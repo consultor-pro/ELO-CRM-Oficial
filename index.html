@@ -2302,6 +2302,19 @@ if (localStorage.getItem('crm_res_monitor_minimizado') !== 'false') {
  </div>
 </section>
 
+<section id="contas" class="page">
+ <div class="card">
+  <div class="between" style="margin-bottom:14px;gap:10px;flex-wrap:wrap">
+    <div>
+      <h2 style="margin:0">🔑 Contas</h2>
+      <small class="muted">Todas as pessoas que usam o Elo CRM. Bloqueie quem não pagou e libere quando acertar: os dados da pessoa continuam guardados.</small>
+    </div>
+    <button class="btn" onclick="show('contas', document.getElementById('btnNavContas'))">Atualizar</button>
+  </div>
+  <div id="eloOnContas"><p class="muted">Carregando…</p></div>
+ </div>
+</section>
+
 <section id="configuracoes" class="page">
   <div class="grid2">
     <div class="card">
@@ -2542,7 +2555,17 @@ function gavetaPeloEndereco(){
     return nome || GAVETA_ANTIGA;
   } catch (e) { return GAVETA_ANTIGA; }
 }
-const EQUIPE_ID = urlParams.get('equipe') || GAVETA_FIXA || gavetaPeloEndereco();
+// === ELO CRM ONLINE ===
+// Endereço do banco na Supabase e a chave PÚBLICA (pode ficar no código: quem manda no que cada um vê é o banco).
+const ELO_ON = { url: "https://hvgujvpeqrudhulruern.supabase.co", chave: "sb_publishable_6VAw2jQl8Z5tCcQoXFDkXg_m4xxFZjw" };
+// "?local=1" no endereço abre o modo antigo, só neste aparelho (serve para resgatar dados de antes do online).
+const ELO_ONLINE = !!(ELO_ON.url && ELO_ON.chave) && !urlParams.has('local');
+// Conta que está com o login aberto neste aparelho (só vale junto com a sessão)
+function eloOnConta(){
+  try { if (!localStorage.getItem('elo_on_sessao')) return null; return JSON.parse(localStorage.getItem('elo_on_conta') || 'null'); } catch (e) { return null; }
+}
+// Online, cada conta tem a própria gaveta neste aparelho: duas pessoas no mesmo computador nunca se misturam.
+const EQUIPE_ID = ELO_ONLINE ? ('elo_on_' + ((eloOnConta() || {}).id || 'entrada')) : (urlParams.get('equipe') || GAVETA_FIXA || gavetaPeloEndereco());
 
 // Mudança de gaveta: na primeira vez que este CRM abre com a gaveta nova, ele
 // traz tudo que estava na antiga (e só então esvazia a antiga). Cada item é
@@ -3570,11 +3593,11 @@ if (!db.gastos) db.gastos = {}; // cada consultor cria suas próprias categorias
 
 let brand = JSON.parse(localStorage.getItem(KEY_BRAND)) || defaultBrand;
 let notifications = JSON.parse(localStorage.getItem(KEY_NOTIFS)) || [];
-let infoPosts = JSON.parse(localStorage.getItem(KEY_INFOS)) || [
+let infoPosts = JSON.parse(localStorage.getItem(KEY_INFOS)) || (ELO_ONLINE ? [] : null) || [
   {id: 'inf1', title: 'Regra de Comissões 3%', desc: 'Cotas de Veículo: 2% em 13x + 0.3% (15ª) + 0.7% restante. Imóvel/Serviço: 100%, 85%, 70% ou 50%.', fileUrl: '', fileName: '', fileType: '', linkUrl: '', date: new Date().toLocaleDateString('pt-BR')}
 ];
 
-let usersList = JSON.parse(localStorage.getItem(KEY_USERS)) || [
+let usersList = JSON.parse(localStorage.getItem(KEY_USERS)) || (ELO_ONLINE ? [] : null) || [
   {
      id: 'u_WC',
     nome: 'CRM',
@@ -3601,7 +3624,7 @@ const userOldWellington = usersList.find(u => u.email === 'wellington@crm.com' |
 if (userOldWellington) userOldWellington.email = 'wc@crm';
 // Checagem pelo ID (estável) em vez do e-mail (editável pelo usuário) —
 // ver nota acima sobre o bug de duplicidade do usuário "u_WC".
-if (!usersList.some(u => u.id === 'u_WC')) {
+if (!ELO_ONLINE && !usersList.some(u => u.id === 'u_WC')) {
   usersList.unshift({
      id: 'u_WC',
     nome: 'CRM',
@@ -5639,7 +5662,7 @@ function initAuth(){
   // Login obrigatório a cada 24h: se a sessão salva já passou desse tempo (ou
   // nunca teve um login registrado — caso de quem já estava logado antes
   // dessa atualização), força a tela de login de novo, por segurança.
-  if (currentUser) {
+  if (currentUser && !ELO_ONLINE) {
     const SESSAO_VALIDADE_MS = 24 * 60 * 60 * 1000;
     const loginTimestamp = Number(localStorage.getItem(`crm_login_timestamp_${EQUIPE_ID}`) || 0);
     const sessaoExpirada = !loginTimestamp || (Date.now() - loginTimestamp) > SESSAO_VALIDADE_MS;
@@ -6149,7 +6172,7 @@ const PAGE_TITLES = {
   materialApoio: 'Material de Apoio', informacoes: 'Informações & Arquivos', aniversarios: 'Aniversariantes',
   calculadora: 'Calculadora',
   agenda: 'Agenda Comercial', usuarios: 'Equipe & Hierarquia', configuracoes: 'Configurações',
-  consultoresVendas: 'Consultores & Vendas', indicesGrupo: 'INCC e INPC', apresentacoes: 'Apresentações', prospeccao: 'Prospecção'
+  consultoresVendas: 'Consultores & Vendas', indicesGrupo: 'INCC e INPC', apresentacoes: 'Apresentações', prospeccao: 'Prospecção', contas: 'Contas'
 };
 
 // ================== BUSCA GLOBAL ==================
@@ -8238,7 +8261,8 @@ function saveNewInfoPost(){
 
   if(!file){
     infoPosts.unshift({
-      id: 'inf_' + Date.now(),
+      id: 'inf_' + Date.now() + Math.random().toString(36).slice(2, 6),
+      autor: (ELO_ONLINE && currentUser) ? currentUser.id : undefined,
       title, desc, linkUrl,
       fileUrl: '', fileName: '', fileType: '',
       date: new Date().toLocaleDateString('pt-BR')
@@ -8266,6 +8290,7 @@ function saveNewInfoPost(){
     }
     infoPosts.unshift({
       id: novoId,
+      autor: (ELO_ONLINE && currentUser) ? currentUser.id : undefined,
       title, desc, linkUrl,
       fileUrl: fileUrlParaSalvar, fileName: file.name, fileType: file.type || '',
       date: new Date().toLocaleDateString('pt-BR')
@@ -8809,7 +8834,7 @@ function saveNewUser(){
   if(!valido){ focarPrimeiroCampoInvalido(); return; }
 
   usersList.push({
-    id: 'u_' + Date.now(),
+    id: 'u_' + Date.now() + Math.random().toString(36).slice(2, 6),
     authId: null, nome, email, pass, cargo, superiorId, nasc,
     matricula: (document.getElementById('nuMatricula')?.value || '').trim(),
     loja: document.getElementById('nuLoja')?.value || '',
@@ -12203,6 +12228,8 @@ function importData(e){
   reader.onload = (evt)=>{
     try{
       const data = JSON.parse(evt.target.result);
+      if (ELO_ONLINE && typeof eloOnAdotarBackup === 'function') eloOnAdotarBackup(data, data.db || data);
+      if (ELO_ONLINE) { const d0 = data.db || data; if (d0 && typeof d0 === 'object') d0.lojas = db.lojas || []; }
       if(data.db) db = data.db; else db = data;
       if(!db.leads) db.leads = [];
       if(!db.sales) db.sales = [];
@@ -12212,10 +12239,10 @@ function importData(e){
       if(!db.bdr) db.bdr = defaultBDR;
       if(!db.meetingSteps) db.meetingSteps = defaultMeetingSteps;
       if(!db.posVenda) db.posVenda = defaultPosVenda;
-      if(data.usersList) usersList = data.usersList;
+      if(data.usersList && !ELO_ONLINE) usersList = data.usersList;
       if(data.brand) brand = data.brand;
-      if(data.notifications) notifications = data.notifications;
-      if(data.infoPosts) infoPosts = data.infoPosts;
+      if(data.notifications && !ELO_ONLINE) notifications = data.notifications;
+      if(data.infoPosts && !ELO_ONLINE) infoPosts = data.infoPosts;
       if(data.googleConfig) googleConfig = data.googleConfig;
       hierMarcarLegado();
 
@@ -12257,6 +12284,7 @@ function importarMesclado(e){
     try{
       const data = JSON.parse(evt.target.result);
       const dbImportado = data.db || data;
+      if (ELO_ONLINE && typeof eloOnAdotarBackup === 'function') eloOnAdotarBackup(data, dbImportado);
       if(!dbImportado || !Array.isArray(dbImportado.leads)){
         alert('Não encontrei dados de leads/vendas nesse arquivo. Confira se é um backup exportado por este CRM (ou por uma cópia dele).');
         e.target.value = '';
@@ -12338,7 +12366,7 @@ function importarMesclado(e){
           usuariosPulados++; return;
         }
         const superiorFinal = userImportado.superiorId && mapaUserId[userImportado.superiorId] ? mapaUserId[userImportado.superiorId] : null;
-        usersList.push(Object.assign({}, userImportado, { id: mapaUserId[userImportado.id], superiorId: superiorFinal, _backupImportId: backupImportId }));
+        if (!ELO_ONLINE) usersList.push(Object.assign({}, userImportado, { id: mapaUserId[userImportado.id], superiorId: superiorFinal, _backupImportId: backupImportId }));
         usuariosNovos++;
       });
 
@@ -15292,7 +15320,7 @@ function salvarNovoConsultor() {
   }
 
   usersList.push({
-    id: 'u_' + Date.now(),
+    id: 'u_' + Date.now() + Math.random().toString(36).slice(2, 6),
     nome: nome,
     email: email || (nome.toLowerCase().replace(/\s+/g, '') + '@crm.local'),
     pass: '123456',
@@ -18947,6 +18975,956 @@ function proRender(){
     }
     return r;
   };
+})();
+</script>
+<style id="eloOnEstilos">
+/* ---------- Elo CRM online ---------- */
+.elo-on-erro { background: #FEF2F2; border: 1px solid #FECACA; color: #991B1B; border-radius: 10px; padding: 10px 12px; font-size: 13px; line-height: 1.4; margin: 10px 0; }
+.elo-on-codigo { border: 1px solid var(--line, #e5e7eb); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.elo-on-cod { font-size: 26px; font-weight: 800; letter-spacing: 5px; font-variant-numeric: tabular-nums; color: #C8102E; user-select: all; }
+.elo-on-bloqueio { position: fixed; inset: 0; z-index: 100000; background: rgba(20, 8, 10, .92); display: flex; align-items: center; justify-content: center; padding: 20px; }
+.elo-on-bloq-caixa { background: #fff; color: #1f2937; border-radius: 16px; padding: 26px 24px; max-width: 420px; width: 100%; text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,.35); }
+.elo-on-bloq-caixa h2 { margin: 0 0 8px; }
+.elo-on-bloq-caixa p { margin: 0 0 14px; font-size: 14px; line-height: 1.5; }
+.elo-on-carga { position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%); z-index: 9000; background: #111827; color: #fff; border-radius: 999px; padding: 9px 16px; font-size: 13px; box-shadow: 0 8px 24px rgba(0,0,0,.25); }
+.elo-on-resumo { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.elo-on-resumo > div { border: 1px solid var(--line, #e5e7eb); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.elo-on-resumo b { font-size: 20px; font-variant-numeric: tabular-nums; }
+.elo-on-resumo span { font-size: 12px; color: #64748b; }
+.elo-on-banco { grid-column: span 2; }
+.elo-on-banco i { display: block; height: 6px; border-radius: 99px; background: #e5e7eb; margin-top: 6px; overflow: hidden; }
+.elo-on-banco em { display: block; height: 100%; border-radius: 99px; }
+.elo-on-barra { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+.elo-on-barra input { flex: 1; min-width: 200px; margin: 0; }
+.elo-on-barra select { max-width: 220px; margin: 0; }
+@media (max-width: 640px) { .elo-on-banco { grid-column: span 1; } .elo-on-cod { font-size: 22px; letter-spacing: 3px; } }
+</style>
+<script id="eloOnScript">
+// ================== ELO CRM ONLINE (Supabase) ==================
+// Um link só para todos: cada pessoa entra com o próprio e-mail e senha e recebe do
+// banco apenas o que pode ver. O CRM continua guardando uma cópia no aparelho (abre
+// rápido e funciona sem internet); este bloco cuida de mandar o que mudou aqui e
+// buscar o que mudou no banco.
+(function(){
+if (typeof ELO_ONLINE === 'undefined' || !ELO_ONLINE) return;
+
+const URL_BASE = ELO_ON.url.replace(/\/+$/, '');
+const CHAVE = ELO_ON.chave;
+const K_SESSAO = 'elo_on_sessao', K_CONTA = 'elo_on_conta';
+const K_META = 'crm_on_meta_' + EQUIPE_ID;
+const eu = () => eloOnConta();
+const logado = () => !!(eu() && lerSessao());
+
+// ---------------- utilidades ----------------
+function lerJson(chave, padrao){ try { const v = JSON.parse(localStorage.getItem(chave) || 'null'); return v == null ? padrao : v; } catch (e) { return padrao; } }
+function lerSessao(){ return lerJson(K_SESSAO, null); }
+function gravarSessao(s){ try { if (s) localStorage.setItem(K_SESSAO, JSON.stringify(s)); else localStorage.removeItem(K_SESSAO); } catch (e) {} }
+// impressão digital curta de um registro (para saber se mudou desde a última sincronização)
+function marca(obj){
+  const t = typeof obj === 'string' ? obj : JSON.stringify(obj);
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+  for (let i = 0; i < t.length; i++) { const c = t.charCodeAt(i); h1 = Math.imul(h1 ^ c, 2654435761); h2 = Math.imul(h2 ^ c, 1597334677); }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (h2 >>> 0).toString(36) + (h1 >>> 0).toString(36);
+}
+function novoId(){ try { return crypto.randomUUID(); } catch (e) { return 'id_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10); } }
+function horaCurta(ms){ const d = new Date(ms); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
+function aviso(msg, tipo){ try { showToast(msg, tipo || 'info'); } catch (e) {} }
+
+// ---------------- o que este aparelho já combinou com o banco ----------------
+// rev: até onde já li | pv: "retrato" de quem eu enxergo | h: impressão digital de cada registro já sincronizado
+let meta = lerJson(K_META, null) || { rev: 0, pv: null, quando: 0, h: { p: {}, pf: {}, pc: {}, l: {}, i: {}, v: {}, po: {}, n: {} }, corte: null };
+['p', 'pf', 'pc', 'l', 'i', 'v', 'po', 'n'].forEach(k => { if (!meta.h[k]) meta.h[k] = {}; });
+function gravarMeta(){ try { localStorage.setItem(K_META, JSON.stringify(meta)); } catch (e) {} }
+
+// ---------------- conversa com a Supabase ----------------
+// texto que o banco aceita: sem o caractere nulo e sem "meio emoji" (pedaço de emoji cortado), que fariam o envio inteiro ser recusado
+function textoLimpo(t){
+  if (t.indexOf('\u0000') >= 0) t = t.split('\u0000').join('');
+  if (typeof t.isWellFormed === 'function') return t.isWellFormed() ? t : t.toWellFormed();
+  return t.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?:[^\uD800-\uDBFF]|^)[\uDC00-\uDFFF]/g, m => m.length > 1 ? m.charAt(0) + '\uFFFD' : '\uFFFD');
+}
+async function pedir(caminho, opcoes){
+  const cab = Object.assign({ 'apikey': CHAVE, 'Content-Type': 'application/json' }, (opcoes && opcoes.cab) || {});
+  const ctrl = new AbortController(); const tempo = setTimeout(() => ctrl.abort(), (opcoes && opcoes.espera) || 30000);
+  try {
+    const r = await fetch(URL_BASE + caminho, { method: (opcoes && opcoes.metodo) || 'POST', headers: cab, body: opcoes && opcoes.corpo !== undefined ? JSON.stringify(opcoes.corpo, (k, v) => typeof v === 'string' ? textoLimpo(v) : v) : undefined, signal: ctrl.signal, cache: 'no-store' });
+    let j = null; try { j = await r.json(); } catch (e) {}
+    return { ok: r.ok, status: r.status, j };
+  } catch (e) { return { ok: false, status: 0, j: null, rede: true }; }
+  finally { clearTimeout(tempo); }
+}
+let renovando = null;
+// devolve uma chave de acesso válida (renova sozinha quando está para vencer)
+async function chaveDeAcesso(forcar){
+  let s = lerSessao(); if (!s) return null;
+  if (!forcar && s.exp - Date.now() > 90000) return s.a;
+  if (!renovando) renovando = (async () => {
+    const atual = lerSessao(); if (!atual) return null;
+    if (!forcar && atual.exp - Date.now() > 90000) return atual.a;      // outra aba já renovou
+    const r = await pedir('/auth/v1/token?grant_type=refresh_token', { corpo: { refresh_token: atual.r } });
+    if (r.ok && r.j && r.j.access_token) {
+      const nova = { a: r.j.access_token, r: r.j.refresh_token, exp: Date.now() + (r.j.expires_in || 3600) * 1000, email: atual.email };
+      gravarSessao(nova); return nova.a;
+    }
+    if (r.rede || r.status >= 500 || r.status === 429) return atual.exp > Date.now() ? atual.a : 'SEM_REDE';
+    gravarSessao(null); return null;                                     // login não vale mais (senha trocada ou saída)
+  })().finally(() => { renovando = null; });
+  return renovando;
+}
+async function rpc(nome, corpo, semLogin){
+  const cab = {};
+  if (!semLogin) {
+    const t = await chaveDeAcesso();
+    if (t === 'SEM_REDE') return { rede: true };
+    if (!t) return { sair: true };
+    cab.Authorization = 'Bearer ' + t;
+  }
+  let r = await pedir('/rest/v1/rpc/' + nome, { corpo, cab });
+  if (!semLogin && r.status === 401) {                                    // chave vencida no meio do caminho: renova e tenta de novo
+    const t = await chaveDeAcesso(true);
+    if (t === 'SEM_REDE') return { rede: true };
+    if (!t) return { sair: true };
+    r = await pedir('/rest/v1/rpc/' + nome, { corpo, cab: { Authorization: 'Bearer ' + t } });
+  }
+  if (r.rede || r.status >= 500 || r.status === 429) return { rede: true };
+  if (!r.ok) return { falha: (r.j && (r.j.message || r.j.msg || r.j.error_description)) || ('erro ' + r.status), status: r.status, codigo: String((r.j && r.j.code) || '') };
+  return { j: r.j };
+}
+
+// ================== ENTRADA ==================
+const TEXTO_ERRO = {
+  codigo_invalido: 'Código incorreto ou vencido. Confira com quem te cadastrou (o código vale 7 dias).',
+  codigo_travado: 'Muitas tentativas com o código errado. Peça um código novo a quem te cadastrou.',
+  senha_curta: 'A senha precisa ter pelo menos 6 letras ou números.',
+  senha_longa: 'Senha muito longa. Use até 72 letras ou números.',
+  email_invalido: 'Confira o e-mail: ele precisa ser completo, como nome@exemplo.com.',
+  sem_cadastro: 'Este e-mail ainda não está cadastrado no Elo CRM. Peça ao seu líder para cadastrar você.',
+  bloqueado: 'Seu acesso está suspenso. Fale com o administrador do Elo CRM.',
+  desativado: 'Seu usuário foi desativado. Fale com o seu líder.'
+};
+function mostrarErroEntrada(msg){
+  let el = document.getElementById('eloOnErro');
+  if (!el) { el = document.createElement('div'); el.id = 'eloOnErro'; el.className = 'elo-on-erro'; const b = document.getElementById('authBtn'); if (b) b.insertAdjacentElement('beforebegin', el); }
+  el.textContent = msg || ''; el.style.display = msg ? 'block' : 'none';
+}
+function ocupado(sim, texto){
+  const b = document.getElementById('authBtn'); if (!b) return;
+  b.disabled = !!sim; b.textContent = sim ? (texto || 'Entrando…') : 'Entrar';
+}
+// depois de a senha ser aceita: descobre quem é a pessoa, prepara a gaveta dela neste aparelho e recarrega
+async function concluirEntrada(email, token){
+  const r = await pedir('/rest/v1/rpc/elo_eu', { corpo: {}, cab: { Authorization: 'Bearer ' + token } });
+  if (r.rede || !r.j) return 'Sem resposta do servidor. Confira a internet e tente de novo.';
+  if (r.j.erro) { gravarSessao(null); return TEXTO_ERRO[r.j.erro] || 'Não foi possível entrar.'; }
+  if (!r.j.id) return 'O banco do Elo CRM ainda não foi instalado na Supabase.';
+  const p = r.j, gaveta = 'elo_on_' + p.id;
+  const pessoa = Object.assign({}, p.x || {}, { id: p.id, nome: p.nome, email: p.email });
+  try {
+    let lista = lerJson('crm_users_' + gaveta, []);
+    if (!Array.isArray(lista)) lista = [];
+    const i = lista.findIndex(u => u && u.id === p.id);
+    if (i >= 0) lista[i] = Object.assign(lista[i], pessoa); else lista.push(pessoa);
+    localStorage.setItem('crm_users_' + gaveta, JSON.stringify(lista));
+    localStorage.setItem('crm_active_user_' + gaveta, JSON.stringify(pessoa));
+    localStorage.setItem('crm_login_timestamp_' + gaveta, String(Date.now()));
+    localStorage.setItem(K_CONTA, JSON.stringify({ id: p.id, email: p.email, nome: p.nome, admin: !!p.admin }));
+  } catch (e) { return 'Este aparelho está sem espaço para guardar os dados. Libere espaço no navegador e tente de novo.'; }
+  location.reload();
+  return null;
+}
+async function entrarComSenha(email, senha){
+  const r = await pedir('/auth/v1/token?grant_type=password', { corpo: { email, password: senha } });
+  if (r.rede) return 'Sem internet (ou o servidor não respondeu). Para entrar pela primeira vez neste aparelho é preciso estar online.';
+  if (!r.ok || !r.j || !r.j.access_token) {
+    if (r.status === 429) return 'Muitas tentativas seguidas neste local. Espere alguns minutos e tente de novo.';
+    return 'E-mail ou senha incorretos. Se é a sua primeira vez aqui, toque em "Primeiro acesso ou esqueci a senha".';
+  }
+  gravarSessao({ a: r.j.access_token, r: r.j.refresh_token, exp: Date.now() + (r.j.expires_in || 3600) * 1000, email });
+  return await concluirEntrada(email, r.j.access_token);
+}
+window.handleAuth = async function(){
+  const email = (document.getElementById('authEmail')?.value || '').trim().toLowerCase();
+  const senha = document.getElementById('authPass')?.value || '';
+  mostrarErroEntrada('');
+  if (!email || !senha) return mostrarErroEntrada('Informe o seu e-mail e a sua senha.');
+  ocupado(true);
+  const erro = await entrarComSenha(email, senha);
+  if (erro) { ocupado(false); mostrarErroEntrada(erro); }
+};
+// Primeiro acesso / esqueci a senha: e-mail + código entregue pelo líder + senha nova
+window.openForgotPasswordModal = function(){
+  const email = (document.getElementById('authEmail')?.value || '').trim();
+  openModal(`
+    <div class="between"><h2 style="margin:0">Primeiro acesso ou senha nova</h2><button class="btn" onclick="closeModal()">✕</button></div>
+    <p class="muted" style="font-size:13px;margin:8px 0 14px">Quem cadastrou você no Elo CRM (seu líder ou o administrador) recebe um <b>código de 6 números</b> para te passar. Com ele você cria a sua senha. Esqueceu a senha? Peça um código novo.</p>
+    <div class="field"><label>Seu e-mail</label><input type="email" id="eloPaEmail" value="${esc(email)}" autocomplete="username" placeholder="nome@exemplo.com"></div>
+    <div class="field"><label>Código de acesso</label><input type="text" id="eloPaCodigo" inputmode="numeric" autocomplete="one-time-code" placeholder="6 números" maxlength="20"></div>
+    <div class="field"><label>Crie a sua senha (6 ou mais letras/números)</label><input type="password" id="eloPaSenha" autocomplete="new-password"></div>
+    <div class="field"><label>Repita a senha</label><input type="password" id="eloPaSenha2" autocomplete="new-password" onkeydown="if(event.key==='Enter') eloOnPrimeiroAcesso()"></div>
+    <div id="eloPaErro" class="elo-on-erro" style="display:none"></div>
+    <div class="row" style="justify-content:flex-end"><button class="btn primary" id="eloPaBtn" onclick="eloOnPrimeiroAcesso()">Criar senha e entrar</button></div>`);
+};
+window.eloOnPrimeiroAcesso = async function(){
+  const v = id => (document.getElementById(id)?.value || '');
+  const email = v('eloPaEmail').trim().toLowerCase(), codigo = v('eloPaCodigo').trim(), senha = v('eloPaSenha'), senha2 = v('eloPaSenha2');
+  const erroEl = document.getElementById('eloPaErro'), btn = document.getElementById('eloPaBtn');
+  const erro = m => { if (erroEl) { erroEl.textContent = m; erroEl.style.display = m ? 'block' : 'none'; } if (btn) { btn.disabled = false; btn.textContent = 'Criar senha e entrar'; } };
+  if (!email || !codigo) return erro('Preencha o e-mail e o código.');
+  if (senha.length < 6) return erro(TEXTO_ERRO.senha_curta);
+  if (senha !== senha2) return erro('As duas senhas não estão iguais.');
+  if (btn) { btn.disabled = true; btn.textContent = 'Conferindo…'; }
+  let r = await rpc('elo_primeiro_acesso', { p_email: email, p_codigo: codigo, p_senha: senha }, true);
+  if (r.rede) return erro('Sem resposta do servidor. Confira a internet e tente de novo.');
+  if (r.falha) return erro('O banco do Elo CRM ainda não respondeu como esperado (' + r.falha + '). Avise o administrador.');
+  if (r.j && r.j.erro === 'conta_nao_criada') {
+    // caminho reserva: cria o login pelo cadastro normal da Supabase e liga ao cadastro com o mesmo código
+    const c = await pedir('/auth/v1/signup', { corpo: { email, password: senha } });
+    const token = c.j && (c.j.access_token || (c.j.session && c.j.session.access_token));
+    if (!token) return erro('Não foi possível criar o seu login agora. Avise o administrador: na Supabase, em Authentication, a opção "Confirm email" precisa estar desligada.');
+    const lig = await pedir('/rest/v1/rpc/elo_vincular', { corpo: { p_codigo: codigo }, cab: { Authorization: 'Bearer ' + token } });
+    if (!lig.j || lig.j.erro) return erro(TEXTO_ERRO[lig.j && lig.j.erro] || 'Não foi possível concluir o acesso. Peça um código novo.');
+    r = { j: { ok: true } };
+  }
+  if (!r.j || r.j.erro) return erro(TEXTO_ERRO[r.j && r.j.erro] || 'Não foi possível concluir o acesso.');
+  if (btn) btn.textContent = 'Entrando…';
+  const e2 = await entrarComSenha(email, senha);
+  if (e2) erro(e2);
+};
+window.logout = async function(){
+  if (logado()) {
+    if (pendencias() > 0 && navigator.onLine !== false) { try { await Promise.race([sincronizar({ motivo: 'sair' }), new Promise(ok => setTimeout(ok, 4000))]); } catch (e) {} }
+    if (pendencias() > 0 && !confirm('Ainda há ' + pendencias() + ' alteração(ões) deste aparelho que não foram para a nuvem (sem internet?).\n\nElas ficam guardadas aqui e sobem quando você entrar de novo neste aparelho. Sair mesmo assim?')) return;
+    const t = (lerSessao() || {}).a;
+    if (t) pedir('/auth/v1/logout', { corpo: {}, cab: { Authorization: 'Bearer ' + t }, espera: 4000 });
+  }
+  try { localStorage.removeItem(`crm_active_user_${EQUIPE_ID}`); localStorage.removeItem(`crm_login_timestamp_${EQUIPE_ID}`); } catch (e) {}
+  gravarSessao(null); try { localStorage.removeItem(K_CONTA); } catch (e) {}
+  setTimeout(() => location.reload(), 150);
+};
+// Trocar a própria senha (Configurações)
+window.changeUserPassword = async function(){
+  const n = document.getElementById('cfgNewPass')?.value || '', c = document.getElementById('cfgConfirmPass')?.value || '';
+  if (n.length < 6) return alert(TEXTO_ERRO.senha_curta);
+  if (n !== c) return alert('As duas senhas não estão iguais.');
+  const t = await chaveDeAcesso();
+  if (!t || t === 'SEM_REDE') return alert('Sem internet agora. Tente de novo quando estiver online.');
+  const r = await pedir('/auth/v1/user', { metodo: 'PUT', corpo: { password: n }, cab: { Authorization: 'Bearer ' + t } });
+  if (!r.ok) return alert('Não foi possível trocar a senha agora' + (r.j && (r.j.msg || r.j.message) ? ' (' + (r.j.msg || r.j.message) + ')' : '') + '.');
+  ['cfgNewPass', 'cfgConfirmPass'].forEach(id => { const e = document.getElementById(id); if (e) e.value = ''; });
+  aviso('Senha trocada. Nos outros aparelhos, entre com a senha nova.', 'success');
+};
+
+// ================== O QUE SOBE E O QUE DESCE ==================
+// vendas: o que quem está acima enxerga (resumo). Todo o resto da venda são os recebimentos (fin).
+const RESUMO = ['id', 'leadId', 'lead', 'responsavel', 'segmento', 'modalidadeParcela', 'prazoContrato', 'valor', 'grupo', 'cota', 'date', 'loja', 'aprov', 'matriculaId', 'matPend', 'matAuto', 'cancelada', 'contemplada'];
+function partirVenda(s){
+  const r = {}, f = {};
+  Object.keys(s).forEach(k => { if (k.charAt(0) === '_' && k !== '_backupImportId') return; (RESUMO.includes(k) ? r : f)[k] = s[k]; });
+  return { r, f };
+}
+// coleções de registros particulares (cada item tem id)
+const COLECOES = [
+  { t: 'lead', ler: () => db.leads, gravar: v => { db.leads = v; } },
+  { t: 'reuniao', ler: () => db.meetings, gravar: v => { db.meetings = v; } },
+  { t: 'follow', ler: () => db.followups, gravar: v => { db.followups = v; } },
+  { t: 'indicador', ler: () => db.indicadores, gravar: v => { db.indicadores = v; } },
+  { t: 'indice', ler: () => db.indices, gravar: v => { db.indices = v; } }
+];
+const MODELOS = [['scripts', () => defaultScripts], ['bdr', () => defaultBDR], ['meetingSteps', () => defaultMeetingSteps], ['posVenda', () => defaultPosVenda]];
+// blocos únicos por pessoa: gastos de cada ano, textos de apoio alterados, lista de prospecção, marca
+function blocos(){
+  const out = [];
+  Object.keys(db.gastos || {}).forEach(ano => out.push({ t: 'gasto', id: String(ano), x: db.gastos[ano] }));
+  MODELOS.forEach(([k, padrao]) => { if (db[k] && JSON.stringify(db[k]) !== JSON.stringify(padrao())) out.push({ t: 'modelo', id: k, x: { v: db[k] } }); });
+  const prosp = db.prospeccao && currentUser && db.prospeccao[currentUser.id];
+  if (Array.isArray(prosp) && prosp.length) out.push({ t: 'prosp', id: 'lista', x: { v: prosp } });
+  if (brand && JSON.stringify(brand) !== JSON.stringify(defaultBrand)) out.push({ t: 'cfg', id: 'marca', x: brand });
+  if (db.contacts) out.push({ t: 'cfg', id: 'geral', x: { contacts: db.contacts } });
+  return out;
+}
+function aplicarBloco(t, id, x){
+  if (t === 'gasto') { if (!db.gastos) db.gastos = {}; if (x) db.gastos[id] = x; else delete db.gastos[id]; }
+  else if (t === 'modelo') { const m = MODELOS.find(q => q[0] === id); if (m) db[id] = x && x.v ? x.v : m[1](); }
+  else if (t === 'prosp') { if (!db.prospeccao || typeof db.prospeccao !== 'object') db.prospeccao = {}; if (currentUser) db.prospeccao[currentUser.id] = x && Array.isArray(x.v) ? x.v : []; }
+  else if (t === 'cfg' && id === 'marca') { if (x) { brand = x; try { applyBrand(); } catch (e) {} } }
+  else if (t === 'cfg' && id === 'geral') { if (x && typeof x.contacts === 'number') db.contacts = x.contacts; }
+}
+function ehColecao(t){ return COLECOES.some(c => c.t === t); }
+function idPorNome(nome){ const u = nome ? hierUsuarioPorNome(nome) : null; return u ? u.id : null; }
+// o que vai para o banco do cadastro de uma pessoa (nunca senha, nem a foto dentro dos dados)
+function fichaPessoa(u){
+  const x = {};
+  Object.keys(u).forEach(k => { if (k.charAt(0) === '_' || ['pass', 'senha', 'recoveryHash', 'recoverySalt', 'authId', 'avatar'].includes(k)) return; x[k] = u[k]; });
+  return x;
+}
+function possoGravarPessoa(u){
+  if (!currentUser) return false;
+  const c = meta.h.pc[u.id];
+  if (c === 'acima') return false;                       // a minha cópia de quem está acima é reduzida: nunca sobe
+  return u.id === currentUser.id || c === 'abaixo' || !meta.h.p[u.id];
+}
+const chaveItem = (t, d, id) => t + '|' + d + '|' + id;
+// publicação como vai para o banco: sem arquivo (anexos ficam só no aparelho de quem publicou)
+function fichaPost(p){ const x = Object.assign({}, p); if (typeof x.fileUrl === 'string' && x.fileUrl.indexOf('idb:') === 0) { x.fileUrl = ''; x.fileName = ''; x.fileType = ''; } return x; }
+
+// Monta a lista do que mudou neste aparelho desde a última sincronização
+function levantarMudancas(){
+  const eu_ = currentUser.id; const m = { l: [], p: [], i: [], v: [], po: [], n: [] }; const novas = {};
+  const apagar = { i: [], v: [], l: [], po: [] };
+  // lojas (só quem pode gerir lojas manda)
+  if ((eu() && eu().admin) || (typeof hierPodeGerirLojas === 'function' && hierPodeGerirLojas())) {
+    const vistos = new Set();
+    (db.lojas || []).forEach(l => { if (!l || !l.id) return; vistos.add(l.id); const h = marca(l); if (meta.h.l[l.id] !== h) { m.l.push({ id: l.id, x: l }); novas['l:' + l.id] = h; } });
+    Object.keys(meta.h.l).forEach(id => { if (!vistos.has(id)) apagar.l.push(id); });
+  }
+  // pessoas: eu e quem está abaixo de mim
+  (usersList || []).forEach(u => {
+    if (!u || !u.id || !possoGravarPessoa(u)) return;
+    const x = fichaPessoa(u), h = marca(x); const item = { id: u.id, x };
+    let mudou = meta.h.p[u.id] !== h;
+    // foto: só mando quando tenho certeza do que há (sem foto, ou foto já carregada na memória)
+    const foto = !u.avatar ? '' : (avatarSrc(u) || null);
+    if (foto !== null) { const hf = foto ? marca(foto) : ''; if ((meta.h.pf[u.id] || '') !== hf) { item.f = foto; novas['pf:' + u.id] = hf; mudou = true; } }
+    if (mudou) { m.p.push(item); novas['p:' + u.id] = h; }
+  });
+  // registros particulares
+  const vistosI = new Set(); const donoDe = new Map();
+  Object.keys(meta.h.i).forEach(k => { const a = k.indexOf('|'), b = k.indexOf('|', a + 1); const d = k.slice(a + 1, b); if (d !== eu_) donoDe.set(k.slice(0, a) + '|' + k.slice(b + 1), d); });
+  COLECOES.forEach(c => {
+    (c.ler() || []).forEach(reg => {
+      if (!reg || typeof reg !== 'object') return;
+      if (!reg.id) reg.id = novoId();
+      const dono = donoDe.get(c.t + '|' + reg.id) || eu_;
+      const k = chaveItem(c.t, dono, reg.id); vistosI.add(k);
+      const h = marca(reg);
+      const item = { t: c.t, id: String(reg.id), d: dono, x: reg };
+      let hp = '';
+      if (dono === eu_) {
+        const para = [];
+        const resp = reg.responsavel && reg.responsavel !== currentUser.nome ? idPorNome(reg.responsavel) : null;
+        if (resp && resp !== eu_) para.push(resp);
+        item.p = para; hp = para.join(',');
+      }
+      if (meta.h.i[k] !== h + (hp ? '~' + hp : '')) { m.i.push(item); novas['i:' + k] = h + (hp ? '~' + hp : ''); }
+    });
+  });
+  blocos().forEach(b => { const k = chaveItem(b.t, eu_, b.id); vistosI.add(k); const h = marca(b.x); if (meta.h.i[k] !== h) { m.i.push({ t: b.t, id: b.id, d: eu_, p: [], x: b.x }); novas['i:' + k] = h; } });
+  Object.keys(meta.h.i).forEach(k => { if (!vistosI.has(k)) apagar.i.push(k); });
+  // vendas
+  const vistosV = new Set();
+  (db.sales || []).forEach(s => {
+    if (!s || typeof s !== 'object') return;
+    if (!s.id) s.id = novoId();
+    vistosV.add(String(s.id));
+    const mv = meta.h.v[s.id]; const h = marca(s);
+    if (mv && mv[0] === h) return;
+    if (mv && !mv[1] && !(typeof hierVeFinanceiro === 'function' && hierVeFinanceiro(s))) return;   // só vejo o resumo: não mando
+    const pv = partirVenda(s);
+    m.v.push({ id: String(s.id), vd: (s.aprov && s.aprov.vendedorId) || idPorNome(s.responsavel) || null, mt: (typeof hierMatriculaId === 'function' ? hierMatriculaId(s) : s.matriculaId) || null, cd: (s.aprov && Array.isArray(s.aprov.cadeia)) ? s.aprov.cadeia : [], r: pv.r, f: pv.f });
+    novas['v:' + s.id] = h;
+  });
+  Object.keys(meta.h.v).forEach(id => { if (!vistosV.has(id) && meta.h.v[id][1]) apagar.v.push(id); else if (!vistosV.has(id)) delete meta.h.v[id]; });
+  // publicações minhas (a ordem vale entre as minhas)
+  const vistosPo = new Set(); let posicao = 0;
+  (infoPosts || []).forEach(p => {
+    if (!p || p.autor !== eu_) return;
+    if (p.ordem !== posicao) p.ordem = posicao; posicao++;
+    vistosPo.add(String(p.id)); const h = marca(fichaPost(p));
+    if (meta.h.po[p.id] !== h) { m.po.push({ id: String(p.id), x: fichaPost(p) }); novas['po:' + p.id] = h; }
+  });
+  Object.keys(meta.h.po).forEach(id => { if (!vistosPo.has(id)) apagar.po.push(id); });
+  // avisos para outras pessoas
+  (notifications || []).forEach(n => {
+    if (!n || !n.id || meta.h.n[n.id] || !Array.isArray(n.para)) return;
+    const outros = n.para.filter(p => p !== eu_);
+    if (!outros.length) return;
+    m.n.push({ id: String(n.id), p: outros, x: { type: n.type, title: n.title, text: n.text, time: n.time, date: n.date } }); novas['n:' + n.id] = 1;
+  });
+  return { m, novas, apagar };
+}
+function pendencias(){
+  if (!currentUser || !logado()) return 0;
+  try { const d = levantarMudancas(); return Object.values(d.m).reduce((a, l) => a + l.length, 0) + d.apagar.i.length + d.apagar.v.length + d.apagar.l.length + d.apagar.po.length; } catch (e) { return 0; }
+}
+function confirmarMarcas(novas, recusados){
+  const rec = new Set((recusados || []).map(r => r.t + ':' + (r.t === 'i' ? chaveItem(r.tipo, r.d || currentUser.id, r.id) : r.id)));
+  Object.keys(novas).forEach(k => {
+    const i = k.indexOf(':'), tipo = k.slice(0, i), id = k.slice(i + 1);
+    if (tipo === 'p' && rec.has('p:' + id)) return;
+    if (tipo === 'pf' && rec.has('p:' + id)) return;
+    if (tipo === 'v') { if (rec.has('v:' + id)) return; meta.h.v[id] = [novas[k], 1]; return; }
+    meta.h[tipo][id] = novas[k];
+  });
+}
+
+// ---------------- aplicar o que veio do banco ----------------
+function trocarConteudo(alvo, novo){ Object.keys(alvo).forEach(k => { delete alvo[k]; }); Object.assign(alvo, novo); return alvo; }
+function aplicarPessoas(lista){
+  let mudou = false; const euId = eu().id;
+  (lista || []).forEach(p => {
+    const novo = Object.assign({}, p.x || {}, { id: p.id, nome: p.nome, email: p.email });
+    if (p.ac) novo._entrou = true; if (p.bl) novo._bloqueado = true;
+    if (p.f) { const chave = 'avatar_' + p.id; arquivoCache[chave] = p.f; try { idbSetArquivo(chave, p.f); } catch (e) {} novo.avatar = 'idb:' + chave; meta.h.pf[p.id] = marca(p.f); }
+    else { novo.avatar = ''; meta.h.pf[p.id] = ''; }
+    let u = (usersList || []).find(q => q.id === p.id);
+    if (u && u.id === euId && u.nome && u.nome !== novo.nome) renomearNosRegistros(u.nome, novo.nome);
+    if (u) trocarConteudo(u, novo); else { usersList.push(novo); u = novo; }
+    meta.h.p[p.id] = marca(fichaPessoa(u)); meta.h.pc[p.id] = p.c; mudou = true;
+  });
+  return mudou;
+}
+function renomearNosRegistros(antigo, novo){
+  [db.leads, db.meetings, db.followups, db.sales].forEach(arr => (arr || []).forEach(r => { if (r && r.responsavel === antigo) r.responsavel = novo; }));
+  (db.leads || []).forEach(l => { if (l && l.createdByName === antigo) l.createdByName = novo; });
+}
+function tirarPessoasForaDaVista(ids){
+  const set = new Set(ids); const antes = usersList.length;
+  usersList = usersList.filter(u => set.has(u.id) || (currentUser && u.id === currentUser.id) || !meta.h.p[u.id]);
+  Object.keys(meta.h.p).forEach(id => { if (!set.has(id)) { delete meta.h.p[id]; delete meta.h.pf[id]; delete meta.h.pc[id]; } });
+  return usersList.length !== antes;
+}
+function aplicarItens(lista){
+  let mudou = false; const euId = eu().id;
+  (lista || []).forEach(it => {
+    const k = chaveItem(it.t, it.d, it.id); const col = COLECOES.find(c => c.t === it.t);
+    if (col) {
+      const arr = col.ler() || []; const i = arr.findIndex(r => r && String(r.id) === String(it.id));
+      if (it.a) { if (i >= 0) { arr.splice(i, 1); mudou = true; } delete meta.h.i[k]; return; }
+      // mudei este registro aqui enquanto a resposta vinha: o meu fica e sobe na próxima
+      if (i >= 0 && meta.h.i[k] && meta.h.i[k].split('~')[0] !== marca(arr[i])) return;
+      if (i >= 0) trocarConteudo(arr[i], it.x); else arr.push(it.x);
+      col.gravar(arr);
+      const hp = it.d === euId ? (it.p || []).join(',') : '';
+      meta.h.i[k] = marca(i >= 0 ? arr[i] : it.x) + (hp ? '~' + hp : ''); mudou = true;
+    } else {
+      if (it.a) { aplicarBloco(it.t, it.id, null); delete meta.h.i[k]; mudou = true; return; }
+      aplicarBloco(it.t, it.id, it.x); meta.h.i[k] = marca(it.x); mudou = true;
+    }
+  });
+  return mudou;
+}
+function aplicarVendas(lista){
+  let mudou = false;
+  (lista || []).forEach(v => {
+    const arr = db.sales || (db.sales = []); const i = arr.findIndex(s => s && String(s.id) === String(v.id));
+    if (v.a) { if (i >= 0) { arr.splice(i, 1); mudou = true; } delete meta.h.v[v.id]; return; }
+    if (i >= 0 && meta.h.v[v.id] && meta.h.v[v.id][1] && meta.h.v[v.id][0] !== marca(arr[i])) return;   // alterada aqui agora: a minha sobe depois
+    const novo = Object.assign({}, v.r, v.f || {});
+    if (!novo.paidMonths || typeof novo.paidMonths !== 'object') novo.paidMonths = {};
+    if (!novo.customInstallments || typeof novo.customInstallments !== 'object') novo.customInstallments = {};
+    if (i >= 0) trocarConteudo(arr[i], novo); else arr.push(novo);
+    meta.h.v[v.id] = [marca(i >= 0 ? arr[i] : novo), v.e ? 1 : 0]; mudou = true;
+  });
+  return mudou;
+}
+// o nome de quem vendeu acompanha o cadastro (se a pessoa mudou de nome, as vendas dela mostram o nome novo)
+function acertarNomesDasVendas(){
+  (db.sales || []).forEach(s => {
+    const vid = s && s.aprov && s.aprov.vendedorId; if (!vid) return;
+    const u = hierUsuario(vid); if (!u || !u.nome || s.responsavel === u.nome) return;
+    const mv = meta.h.v[s.id]; const limpa = mv && mv[0] === marca(s);
+    s.responsavel = u.nome;
+    if (limpa && !mv[1]) mv[0] = marca(s);      // venda só de leitura: não é uma alteração minha
+  });
+}
+function aplicarLojas(lista){
+  let mudou = false; if (!Array.isArray(db.lojas)) db.lojas = [];
+  (lista || []).forEach(l => {
+    const i = db.lojas.findIndex(q => q.id === l.id);
+    if (l.a) { if (i >= 0) { db.lojas.splice(i, 1); mudou = true; } delete meta.h.l[l.id]; return; }
+    if (i >= 0) trocarConteudo(db.lojas[i], l.x); else db.lojas.push(l.x);
+    meta.h.l[l.id] = marca(i >= 0 ? db.lojas[i] : l.x); mudou = true;
+  });
+  return mudou;
+}
+function aplicarPosts(lista){
+  if (!Array.isArray(lista)) return false;
+  const euId = eu().id;
+  const locais = (infoPosts || []).filter(p => p && !p.autor);                 // os que são só deste aparelho ficam
+  const meus = new Map((infoPosts || []).filter(p => p && p.autor === euId).map(p => [String(p.id), p]));
+  const minhas = [], dosOutros = [];
+  lista.forEach(p => {
+    const x = Object.assign({}, p.x, { autor: p.d });
+    if (p.d !== euId) { dosOutros.push(x); return; }
+    const meu = meus.get(String(p.id)); meus.delete(String(p.id));
+    if (meu && meta.h.po[p.id] !== marca(fichaPost(meu))) { minhas.push(meu); return; }   // alterei aqui e ainda não subiu: a minha vale
+    if (!meu && meta.h.po[p.id]) return;                                                   // apaguei aqui e ainda não subiu: não volta
+    minhas.push(x); meta.h.po[p.id] = marca(fichaPost(x));
+  });
+  // minhas que o banco não tem: as novas (ainda não enviadas) ficam; as já enviadas foram apagadas em outro aparelho
+  const novasMinhas = [];
+  meus.forEach(p => { if (meta.h.po[p.id]) delete meta.h.po[p.id]; else novasMinhas.push(p); });
+  const ord = p => (typeof p.ordem === 'number' ? p.ordem : 9999);
+  minhas.sort((a, b) => ord(a) - ord(b));
+  dosOutros.sort((a, b) => String(a.autor).localeCompare(String(b.autor)) || ord(a) - ord(b));
+  infoPosts = novasMinhas.concat(minhas, dosOutros, locais);
+  return true;
+}
+function aplicarAvisos(lista){
+  let n = 0; const euId = eu().id;
+  (lista || []).forEach(a => {
+    meta.h.n[a.id] = 1;
+    if ((notifications || []).some(q => q.id === a.id)) return;
+    notifications.unshift(Object.assign({ id: a.id, read: false, para: [euId] }, a.x || {})); n++;
+  });
+  return n;
+}
+function aplicarSaidas(lista){
+  let mudou = false;
+  (lista || []).forEach(s => {
+    if (s.t === 'v') { const i = (db.sales || []).findIndex(q => String(q.id) === s.k); if (i >= 0 && !(meta.h.v[s.k] && meta.h.v[s.k][1])) { db.sales.splice(i, 1); mudou = true; delete meta.h.v[s.k]; } }
+    else if (s.t === 'i') {
+      const [t, d, id] = s.k.split('|'); if (d === eu().id) return;
+      const col = COLECOES.find(c => c.t === t); if (!col) return;
+      const arr = col.ler() || []; const i = arr.findIndex(r => r && String(r.id) === id);
+      if (i >= 0) { arr.splice(i, 1); mudou = true; } delete meta.h.i[s.k];
+    }
+  });
+  return mudou;
+}
+function aplicarCorte(corte){
+  if (!corte) return false; const antes = (db.sales || []).length;
+  db.sales = (db.sales || []).filter(s => { const mv = meta.h.v[s.id]; if (!mv || mv[1]) return true; if (String(s.date || '') >= corte) return true; delete meta.h.v[s.id]; return false; });
+  return db.sales.length !== antes;
+}
+// grava no aparelho o que veio do banco, sem disparar outra sincronização
+function guardarNoAparelho(){
+  try { hierLimparCache(); } catch (e) {}
+  const eu_ = (usersList || []).find(u => u.id === eu().id);
+  if (eu_) { currentUser = eu_; try { localStorage.setItem(`crm_active_user_${EQUIPE_ID}`, JSON.stringify(currentUser)); } catch (e) {} }
+  persistirChave(KEY_DB, JSON.stringify(db), db);
+  persistirChave(KEY_USERS, JSON.stringify(usersList), usersList);
+  persistirChave(KEY_BRAND, JSON.stringify(brand), brand);
+  if (typeof podarNotificacoes === 'function') podarNotificacoes();
+  persistirChave(KEY_NOTIFS, JSON.stringify(notifications), notifications);
+  persistirChave(KEY_INFOS, JSON.stringify(infoPosts), infoPosts);
+  try { reiniciarBaseDoHistorico(true); } catch (e) {}
+  try { if (!modalAberto()) { renderAll(); updateUserInterface(); } else { pendenteDeTela = true; } } catch (e) {}
+}
+let pendenteDeTela = false;
+function modalAberto(){ const m = document.getElementById('modal'); return !!(m && m.classList.contains('show')); }
+
+// ================== SINCRONIZAR ==================
+let rodando = false, deNovo = false, ultimoErro = '', bloqueio = '', primeiraCarga = meta.rev === 0;
+const LOTE = 300;
+function recusas(lista){
+  const querer = { p: [], v: [] }; const msgs = [];
+  (lista || []).forEach(r => {
+    if (r.t === 'p') {
+      const u = (usersList || []).find(q => q.id === r.id); const nome = r.nome || (u && u.nome) || 'a pessoa';
+      const motivo = { email_em_uso: 'este e-mail já está em uso no Elo CRM', nome_em_uso: 'já existe alguém com esse nome no Elo CRM (acrescente um sobrenome)', email_invalido: 'o e-mail precisa ser completo (nome@exemplo.com)', sem_permissao: 'você só pode cadastrar ou alterar quem está abaixo de você', lider_de_outra_equipe: 'o líder escolhido não é da sua equipe', lider_em_circulo: 'essa pessoa não pode ficar abaixo de alguém da própria equipe', sem_lider: 'a pessoa precisa de um líder', email_nao_trocou: 'não foi possível trocar o e-mail de quem já entrou; tente de novo mais tarde' }[r.motivo] || r.motivo;
+      msgs.push(`Não foi possível salvar o cadastro de ${nome}: ${motivo}.`);
+      if (meta.h.p[r.id]) querer.p.push(r.id);                              // já existia: busco de volta como está no banco
+      else { usersList = usersList.filter(q => q.id !== r.id); }            // era novo: sai da lista
+    } else if (r.t === 'v') {
+      if (r.motivo === 'grande_demais') { const s = (db.sales || []).find(q => String(q.id) === r.id); if (s) meta.h.v[s.id] = [marca(s), 1]; }
+      else if (r.motivo === 'id_em_uso' || r.motivo === 'id_invalido') { const s = (db.sales || []).find(q => String(q.id) === r.id); if (s) { delete meta.h.v[s.id]; s.id = novoId(); } }
+      else { querer.v.push(r.id); }
+    } else if (r.t === 'i') {
+      const k = chaveItem(r.tipo, r.d || currentUser.id, r.id);
+      if (r.motivo === 'id_invalido') msgs.push('Um registro antigo tem um código que a nuvem não aceita e fica só neste aparelho.');
+      if (r.motivo === 'limite') msgs.push('Você chegou ao limite de registros da sua conta. Fale com o administrador.');
+      else if (r.motivo === 'grande_demais') msgs.push('Um registro ficou grande demais para ir para a nuvem (muito texto em um lead só). Ele continua neste aparelho.');
+      meta.h.i[k] = (function(){ const col = COLECOES.find(c => c.t === r.tipo); const reg = col && (col.ler() || []).find(q => q && String(q.id) === r.id); return reg ? marca(reg) : 'x'; })();
+    } else if (r.t === 'l') { msgs.push('Só quem está no topo da equipe (ou o administrador) cria e altera lojas.'); }
+  });
+  [...new Set(msgs)].slice(0, 3).forEach(t => aviso(t, 'warn'));
+  return querer;
+}
+function mostrarCodigos(lista){
+  if (!lista || !lista.length) return;
+  const link = location.origin + location.pathname;
+  const blocosHtml = lista.map(c => {
+    const texto = `Olá, ${c.nome.split(' ')[0]}! Seu acesso ao Elo CRM está pronto.\n\n1. Abra: ${link}\n2. Toque em "Primeiro acesso ou esqueci a senha"\n3. E-mail: ${c.email}\n4. Código: ${c.codigo}\n\nVocê cria a sua senha na hora. O código vale ${c.dias} dias.`;
+    return `<div class="elo-on-codigo"><div><b>${esc(c.nome)}</b><br><small class="muted">${esc(c.email)}</small></div><div class="elo-on-cod">${esc(c.codigo)}</div>
+      <div class="row" style="gap:6px;flex-wrap:wrap"><button class="btn" onclick="eloOnCopiar(this)" data-t="${esc(texto)}">Copiar mensagem</button><a class="btn green" style="text-decoration:none" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(texto)}">Enviar pelo WhatsApp</a></div></div>`;
+  }).join('');
+  const abrir = () => openModal(`<div class="between"><h2 style="margin:0">Código de acesso</h2><button class="btn" onclick="closeModal()">✕</button></div>
+    <p class="muted" style="font-size:13px;margin:8px 0 12px">Passe o código para a pessoa. Com ele, ela cria a própria senha em "Primeiro acesso ou esqueci a senha". <b>O código aparece só agora</b> e vale 7 dias; se precisar, gere outro em Equipe › Meta e senha.</p>${blocosHtml}`);
+  setTimeout(abrir, modalAberto() ? 900 : 100);
+}
+window.eloOnCopiar = function(btn){
+  const t = btn.getAttribute('data-t') || '';
+  const feito = () => { btn.textContent = 'Copiado ✓'; setTimeout(() => { btn.textContent = 'Copiar mensagem'; }, 1800); };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(feito, () => prompt('Copie o texto:', t)); else prompt('Copie o texto:', t);
+};
+function tratarErroDeAcesso(erro){
+  if (erro === 'bloqueado' || erro === 'desativado' || erro === 'sem_cadastro') { bloqueio = erro; mostrarBloqueio(); return true; }
+  return false;
+}
+function mostrarBloqueio(){
+  let el = document.getElementById('eloOnBloqueio');
+  if (!bloqueio) { if (el) el.remove(); return; }
+  if (!el) { el = document.createElement('div'); el.id = 'eloOnBloqueio'; el.className = 'elo-on-bloqueio'; document.body.appendChild(el); }
+  const titulo = bloqueio === 'bloqueado' ? 'Acesso suspenso' : (bloqueio === 'desativado' ? 'Usuário desativado' : 'Cadastro não encontrado');
+  el.innerHTML = `<div class="elo-on-bloq-caixa"><h2>${titulo}</h2><p>${esc(TEXTO_ERRO[bloqueio] || '')}</p><p class="muted" style="font-size:12.5px">Seus dados continuam guardados. Assim que o acesso for liberado, tudo volta como estava.</p>
+    <div class="row" style="gap:8px;justify-content:center;flex-wrap:wrap"><button class="btn primary" onclick="eloOnSincronizarAgora()">Tentar de novo</button><button class="btn" onclick="logout()">Sair</button></div></div>`;
+}
+async function sincronizar(op){
+  op = op || {};
+  if (!logado() || !currentUser) return;
+  if (rodando) { deNovo = true; return; }
+  rodando = true; deNovo = false; atualizarSelo();
+  let mudouTela = false, voltas = 0, extra = {}, lote = LOTE, comProblema = 0;
+  try {
+    for (;;) {
+      if (++voltas > 400) break;
+      const lev = levantarMudancas(); const m = lev.m;
+      // apagados neste aparelho: confere antes de apagar muita coisa da nuvem de uma vez
+      const nApagar = lev.apagar.i.length + lev.apagar.v.length;
+      const conhecidos = Object.keys(meta.h.i).length + Object.keys(meta.h.v).length;
+      if (nApagar > 25 && nApagar > conhecidos * 0.2 && !op.apagarConfirmado) {
+        const sim = confirm(`Neste aparelho ${nApagar} registros (leads, agenda ou vendas) deixaram de existir desde a última sincronização.\n\nOK = apagar também da nuvem (e dos seus outros aparelhos)\nCancelar = trazer esses registros de volta da nuvem`);
+        if (sim) op.apagarConfirmado = true;
+        else { lev.apagar.i.forEach(k => delete meta.h.i[k]); lev.apagar.v.forEach(id => delete meta.h.v[id]); lev.apagar.i = []; lev.apagar.v = []; extra.tudo = true; }
+      }
+      lev.apagar.i.forEach(k => { const [t, d, id] = k.split('|'); m.i.push({ t, d, id, a: 1 }); });
+      lev.apagar.v.forEach(id => m.v.push({ id, a: 1 }));
+      lev.apagar.l.forEach(id => m.l.push({ id, a: 1 }));
+      lev.apagar.po.forEach(id => m.po.push({ id, a: 1 }));
+      // manda em lotes (um backup importado pode ter milhares de registros)
+      const envio = {}; let cabem = lote, sobrou = false;
+      ['l', 'p', 'i', 'v', 'po', 'n'].forEach(t => { if (!m[t].length) return; const parte = m[t].slice(0, Math.max(cabem, 0)); if (parte.length < m[t].length) sobrou = true; if (parte.length) envio[t] = parte; cabem -= parte.length; });
+      const enviados = new Set(); Object.keys(envio).forEach(t => envio[t].forEach(it => enviados.add((t === 'i' ? 'i:' + chaveItem(it.t, it.d, it.id) : t + ':' + it.id))));
+      const corpo = Object.assign({ rev: meta.rev, pv: meta.pv }, extra); extra = {};
+      if (Object.keys(envio).length) corpo.m = envio;
+      const r = await rpc('elo_sinc', { p: corpo });
+      if (r.sair) { ultimoErro = 'sair'; gravarSessao(null); aviso('Sua sessão terminou neste aparelho. Entre de novo para continuar sincronizando.', 'warn'); setTimeout(() => location.reload(), 2500); break; }
+      if (r.rede) { ultimoErro = 'rede'; break; }
+      if (r.falha) {
+        // só isola registro quando o banco diz que o problema é o DADO enviado (erros da família 22); qualquer outra falha: para e tenta depois
+        const nEnvio = (r.status === 400 && /^22/.test(r.codigo || '')) ? enviados.size : 0;
+        if (nEnvio > 1) { lote = Math.max(1, Math.floor(Math.min(lote, nEnvio) / 4)); continue; }        // o banco recusou o envio: tenta em pedaços menores para achar o registro com problema
+        if (nEnvio === 1) {                                                                               // achou: esse registro fica só neste aparelho
+          const unico = {}; Object.keys(lev.novas).forEach(k => { const base = k.startsWith('pf:') ? 'p:' + k.slice(3) : k; if (enviados.has(base)) unico[k] = lev.novas[k]; });
+          confirmarMarcas(unico, []); Object.keys(envio).forEach(t => envio[t].forEach(it => { if (it.a && t === 'i') delete meta.h.i[chaveItem(it.t, it.d, it.id)]; if (it.a && t === 'v') delete meta.h.v[it.id]; }));
+          comProblema++; gravarMeta(); console.warn('Elo online: registro recusado pelo banco', r.falha, envio); continue;
+        }
+        ultimoErro = 'falha: ' + r.falha; console.warn('Elo online:', r.falha); break;
+      }
+      if (lote < LOTE) lote = Math.min(LOTE, lote * 4);
+      const j = r.j || {};
+      if (j.erro) { if (!tratarErroDeAcesso(j.erro)) ultimoErro = j.erro; break; }
+      if (bloqueio) { bloqueio = ''; mostrarBloqueio(); }
+      ultimoErro = '';
+      // o que subiu e foi aceito passa a contar como sincronizado
+      const aceitas = {}; Object.keys(lev.novas).forEach(k => { const base = k.startsWith('pf:') ? 'p:' + k.slice(3) : k; if (enviados.has(base)) aceitas[k] = lev.novas[k]; });
+      confirmarMarcas(aceitas, j.rec);
+      Object.keys(envio).forEach(t => envio[t].forEach(it => { if (!it.a) return; if (t === 'i') delete meta.h.i[chaveItem(it.t, it.d, it.id)]; else if (t === 'v') delete meta.h.v[it.id]; else if (t === 'l') delete meta.h.l[it.id]; else if (t === 'po') delete meta.h.po[it.id]; }));
+      const querer = recusas(j.rec); if (j.rec && j.rec.length) mudouTela = true;
+      if (j.eu) { const c = eu(); if (c && !!c.admin !== !!j.eu.admin) { c.admin = !!j.eu.admin; try { localStorage.setItem(K_CONTA, JSON.stringify(c)); } catch (e) {} montarAdmin(); } }
+      if (j.cfg && j.cfg.intervalo) intervalo = Math.max(30, Number(j.cfg.intervalo) || 120);
+      if (!j.nada) {
+        if (aplicarLojas(j.l)) mudouTela = true;
+        if (aplicarPessoas(j.p)) mudouTela = true;
+        let faltam = [];
+        if (j.pids) {
+          if (tirarPessoasForaDaVista(j.pids)) mudouTela = true;
+          const tenho = new Set(usersList.map(u => u.id)); faltam = j.pids.filter(id => !tenho.has(id));
+        }
+        try { hierLimparCache(); } catch (e) {}
+        if (aplicarItens(j.i)) mudouTela = true;
+        if (aplicarVendas(j.v)) mudouTela = true;
+        if (aplicarSaidas(j.rm)) mudouTela = true;
+        if (aplicarPosts(j.po)) mudouTela = true;
+        const nAvisos = aplicarAvisos(j.n); if (nAvisos) { mudouTela = true; try { updateNotifBadge(); } catch (e) {} }
+        if (j.corte !== undefined && j.corte !== meta.corte) { meta.corte = j.corte || null; }
+        if (aplicarCorte(meta.corte)) mudouTela = true;
+        if (j.p && j.p.length) acertarNomesDasVendas();
+        if (faltam.length) extra.quero = faltam.slice(0, 250);
+        else if (j.pv) meta.pv = j.pv;
+        if (j.cotas && j.cotas.length) aviso('Atenção: o grupo e a cota de uma venda lançada agora já constam em uma venda de outra equipe. Confira se não é a mesma venda lançada duas vezes.', 'warn');
+        mostrarCodigos(j.codigos);
+      }
+      if (typeof j.rev === 'number') meta.rev = j.rev;
+      if (querer.p.length) extra.quero = (extra.quero || []).concat(querer.p);
+      if (querer.v.length) extra.querov = querer.v;
+      meta.quando = Date.now(); gravarMeta();
+      if (j.mais || sobrou || extra.quero || extra.querov || extra.tudo) { atualizarSelo(true); continue; }
+      break;
+    }
+  } catch (e) { console.warn('Elo online: falha ao sincronizar', e); ultimoErro = 'falha'; }
+  finally {
+    rodando = false;
+    if (mudouTela) guardarNoAparelho();
+    if (comProblema) aviso(comProblema + ' registro(s) não puderam ir para a nuvem (texto que o banco não aceita). Eles continuam neste aparelho.', 'warn');
+    if (primeiraCarga && !ultimoErro) { primeiraCarga = false; const f = document.getElementById('eloOnCarga'); if (f) f.remove(); }
+    atualizarSelo();
+    if (deNovo) setTimeout(() => sincronizar(), 300);
+  }
+}
+window.eloOnSincronizarAgora = function(){ sincronizar({ motivo: 'manual' }).then(() => { if (!ultimoErro && !bloqueio) aviso('Tudo sincronizado.', 'success'); else if (ultimoErro === 'rede') aviso('Sem internet agora. O que você fizer fica guardado neste aparelho e sobe depois.', 'warn'); eloOnPintarCartao(); }); };
+window.eloOnConferirTudo = function(){
+  if (!confirm('Conferir tudo com a nuvem?\n\nO CRM busca de novo todos os seus registros. Use se achar que algo não apareceu neste aparelho.')) return;
+  meta.rev = 0; meta.pv = null; gravarMeta(); window.eloOnSincronizarAgora();
+};
+
+// ---------------- quando sincronizar ----------------
+let intervalo = 120, relogio = null, espera = null;
+window.agendarSincronizacaoNuvem = function(){
+  if (!logado()) return;
+  if (espera) clearTimeout(espera);
+  espera = setTimeout(() => { espera = null; sincronizar(); }, 2500);
+  atualizarSelo();
+};
+window.carregarDaNuvem = function(){ if (logado()) sincronizar(); };
+window.enviarParaNuvem = function(){ if (logado()) sincronizar(); };
+function ligarRelogio(){
+  if (relogio) clearInterval(relogio);
+  let passou = 0;
+  relogio = setInterval(() => {
+    passou += 15;
+    if (document.visibilityState !== 'visible' || navigator.onLine === false) return;
+    if (passou >= intervalo) { passou = 0; sincronizar(); }
+  }, 15000);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && Date.now() - (meta.quando || 0) > 20000) { passou = 0; sincronizar(); } });
+  window.addEventListener('online', () => sincronizar());
+  window.addEventListener('offline', () => atualizarSelo());
+}
+function atualizarSelo(andando){
+  const el = document.getElementById('cloudStatusBadge'); if (!el) return;
+  if (!logado()) { el.textContent = '☁️ Elo CRM online'; return; }
+  if (bloqueio) { el.textContent = '⛔ Acesso suspenso'; return; }
+  if (rodando || andando) { el.textContent = primeiraCarga ? '⏳ Baixando seus dados…' : '🔄 Sincronizando…'; return; }
+  if (navigator.onLine === false || ultimoErro === 'rede') { el.textContent = '📴 Sem internet · salvando neste aparelho'; return; }
+  if (ultimoErro) { el.textContent = '⚠️ Não sincronizou · tentando de novo'; return; }
+  el.textContent = espera ? '⏳ Enviando alterações…' : ('☁️ Sincronizado' + (meta.quando ? ' às ' + horaCurta(meta.quando) : ''));
+  el.title = 'Toque para sincronizar agora'; el.style.cursor = 'pointer'; el.onclick = () => window.eloOnSincronizarAgora();
+}
+
+// ================== AJUSTES DE TELA ==================
+function ajustarTelaDeEntrada(){
+  const rot = document.querySelector('#authScreen label'); if (rot) rot.textContent = 'E-mail';
+  const em = document.getElementById('authEmail'); if (em) { em.type = 'email'; em.placeholder = 'nome@exemplo.com'; em.autocomplete = 'username'; }
+  const esq = document.querySelector('#authScreen a[onclick*="openForgotPasswordModal"]'); if (esq) esq.textContent = 'Primeiro acesso ou esqueci a senha';
+  const rod = document.querySelector('#authScreen .elo-rodape'); if (rod) rod.innerHTML = '<span class="ponto"></span>Tecnologia Elo CRM · seus dados na nuvem e neste aparelho';
+}
+// na tela de entrada: confere se o banco responde e diz, em português claro, o que falta
+async function conferirBanco(){
+  const rod = document.querySelector('#authScreen .elo-rodape'); if (!rod) return;
+  const r = await pedir('/rest/v1/rpc/elo_versao', { metodo: 'GET', espera: 12000 });
+  let msg = '';
+  if (r.rede) msg = navigator.onLine === false ? 'Você está sem internet. Para entrar pela primeira vez neste aparelho é preciso estar online.' : 'Não foi possível falar com o banco do Elo CRM agora. Tente de novo em instantes.';
+  else if (r.ok && r.j && r.j.elo === 'ok') msg = r.j.dono ? '' : 'Banco instalado. Falta o primeiro acesso do dono: toque em "Primeiro acesso ou esqueci a senha" e use o código do dono.';
+  else if (r.status === 404) msg = 'O banco do Elo CRM ainda não foi instalado na Supabase (falta colar o texto de instalação no SQL Editor).';
+  else if (r.status === 401 || r.status === 403) msg = 'A chave do banco não foi aceita pela Supabase. Avise o administrador.';
+  else msg = 'O banco do Elo CRM respondeu de um jeito inesperado (' + r.status + '). Avise o administrador.';
+  let el = document.getElementById('eloOnBanco');
+  if (!msg) { if (el) el.remove(); return; }
+  if (!el) { el = document.createElement('div'); el.id = 'eloOnBanco'; el.className = 'elo-on-erro'; el.style.background = '#FFFBEB'; el.style.borderColor = '#FDE68A'; el.style.color = '#92400E'; rod.insertAdjacentElement('beforebegin', el); }
+  el.textContent = msg;
+}
+window.eloOnPintarCartao = function(){
+  const st = document.getElementById('eloNuvemStatus'); if (!st) return;
+  const cartao = st.closest('.card'); if (!cartao) return;
+  const n = pendencias();
+  cartao.innerHTML = `<h2>☁️ Elo CRM online</h2>
+    <p class="muted" style="font-size:13px;margin-bottom:10px">Tudo o que você cadastra é guardado neste aparelho e enviado para a nuvem. Entrando com o seu e-mail em outro aparelho, seus dados aparecem lá também.</p>
+    <div id="eloNuvemStatus" style="font-size:13px;font-weight:700;margin-bottom:12px">${esc((eu() || {}).email || '')} · ${ultimoErro === 'rede' || navigator.onLine === false ? 'sem internet agora' : (meta.quando ? 'sincronizado às ' + horaCurta(meta.quando) : 'ainda não sincronizou')}${n ? ' · ' + n + ' alteração(ões) para enviar' : ''}</div>
+    <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn primary" onclick="eloOnSincronizarAgora()">🔄 Sincronizar agora</button><button class="btn" onclick="eloOnConferirTudo()">Conferir tudo com a nuvem</button><button class="btn" onclick="logout()">Sair deste aparelho</button></div>`;
+};
+window.eloAtualizarCardNuvem = function(){ try { window.eloOnPintarCartao(); } catch (e) {} };
+function ajustarConfiguracoes(){
+  window.eloOnPintarCartao();
+  document.querySelectorAll('#configuracoes h3').forEach(h => {
+    if (/Alterar Minha Senha/i.test(h.textContent)) h.textContent = '🔒 Trocar a minha senha';
+    if (/Código de Recuperação/i.test(h.textContent)) {     // esqueceu a senha? o líder gera um código novo
+      let n = h.previousElementSibling; if (n && n.tagName === 'HR') n.style.display = 'none';
+      h.style.display = 'none'; n = h.nextElementSibling;
+      while (n && n.tagName !== 'HR' && n.tagName !== 'H3') { n.style.display = 'none'; n = n.nextElementSibling; }
+    }
+  });
+  const emailCfg = document.getElementById('cfgEmail');
+  if (emailCfg && !emailCfg.dataset.on) {
+    emailCfg.dataset.on = '1'; emailCfg.type = 'email';
+    const campo = emailCfg.closest('.field'); const rot = campo && campo.querySelector('label'); const dica = campo && campo.querySelector('small');
+    if (rot) rot.textContent = 'E-mail (é com ele que você entra)';
+    if (dica) dica.textContent = 'Se trocar, passe a entrar com o e-mail novo. A senha continua a mesma.';
+  }
+}
+// janela "Meta e senha": no lugar da senha provisória, um código de acesso novo
+const abrirPermOriginal = window.openPermissionsModal;
+window.openPermissionsModal = function(userId){
+  abrirPermOriginal(userId);
+  const campo = document.getElementById('permNovaSenha'); if (!campo) return;
+  const caixa = campo.closest('div[style*="FFF6F7"]') || campo.parentElement.parentElement;
+  const u = (usersList || []).find(x => x.id === userId); if (!u || !caixa) return;
+  caixa.innerHTML = `<label style="font-size:13px;color:#4A1C24"><b>🔑 Acesso de ${esc(u.nome)}</b></label>
+    <p class="muted" style="font-size:12.5px;margin:6px 0 10px">${u._entrou ? 'Esta pessoa já entrou no Elo CRM. Esqueceu a senha? Gere um código novo: com ele, ela cria outra senha.' : 'Esta pessoa ainda não entrou. Gere um código e passe para ela criar a senha no primeiro acesso.'}</p>
+    <button class="btn" onclick="eloOnGerarCodigo('${u.id}')">Gerar código de acesso</button>`;
+};
+window.eloGestorRedefinirSenha = function(userId){ window.eloOnGerarCodigo(userId); };
+window.eloOnGerarCodigo = async function(userId){
+  if (pendencias() > 0) await sincronizar();
+  const r = await rpc('elo_novo_codigo', { p_pessoa: userId });
+  if (r.rede) return alert('Sem internet agora. Tente de novo quando estiver online.');
+  if (r.sair) return alert('Sua sessão terminou. Entre de novo.');
+  if (r.falha || !r.j || r.j.erro) return alert({ sem_permissao: 'Só quem está acima desta pessoa (ou o administrador) gera o código dela.', nao_encontrado: 'Esta pessoa ainda não foi enviada para a nuvem. Sincronize e tente de novo.' }[r.j && r.j.erro] || 'Não foi possível gerar o código agora.');
+  closeModal(); mostrarCodigos([r.j]);
+};
+// janela "Adicionar Novo Membro": sem senha (a pessoa cria a dela) e com o e-mail de verdade
+const novoMembroOriginal = window.openNewUserModal;
+window.openNewUserModal = function(){
+  novoMembroOriginal();
+  const senha = document.getElementById('nuPass'); if (senha) { const f = senha.closest('.field'); if (f) f.style.display = 'none'; }
+  const em = document.getElementById('nuEmail');
+  if (em) { em.type = 'email'; em.placeholder = 'nome@exemplo.com'; const rot = em.closest('.field')?.querySelector('label'); if (rot) rot.textContent = 'E-mail da pessoa (é com ele que ela entra)'; }
+};
+const salvarMembroOriginal = window.saveNewUser;
+window.saveNewUser = function(){
+  const em = (document.getElementById('nuEmail')?.value || '').trim();
+  if (em && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)) return alert('Use o e-mail completo da pessoa (nome@exemplo.com). É com ele que ela vai entrar no Elo CRM.');
+  const antes = usersList.length;
+  salvarMembroOriginal();
+  if (usersList.length > antes) { if (espera) { clearTimeout(espera); espera = null; } sincronizar(); }   // sobe já, para o código de acesso aparecer
+};
+// publicação de outra pessoa: só leio
+const abrirPostOriginal = window.abrirPublicacaoInfo;
+window.abrirPublicacaoInfo = function(id){
+  abrirPostOriginal(id);
+  const post = (infoPosts || []).find(p => p.id === id);
+  if (post && post.autor && currentUser && post.autor !== currentUser.id) {
+    document.querySelectorAll('#modal button').forEach(b => { if (/Editar|Excluir/.test(b.textContent)) b.style.display = 'none'; });
+    const autor = hierUsuario(post.autor); const tit = document.querySelector('#modal h2');
+    if (autor && tit) tit.insertAdjacentHTML('afterend', `<small class="muted" style="display:block">Publicado por ${esc(autor.nome)}</small>`);
+  }
+};
+// backup de outro CRM: os registros do dono daquele CRM passam a ser meus aqui (o nome dele vira o meu)
+window.eloOnAdotarBackup = function(data, dbImp){
+  try {
+    if (!currentUser || !dbImp) return;
+    const lista = Array.isArray(data && data.usersList) ? data.usersList : [];
+    if (lista.some(u => u && u.id === currentUser.id)) return;      // backup desta mesma conta: fica como está
+    const dono = lista.find(u => u && u.id === 'u_WC') || lista.find(u => u && !u.superiorId) || lista[0];
+    if (!dono || !dono.nome) return;
+    const meu = currentUser.nome, meuId = currentUser.id;
+    ['leads', 'meetings', 'followups', 'sales'].forEach(k => (dbImp[k] || []).forEach(r => {
+      if (!r) return;
+      if (r.responsavel === dono.nome) r.responsavel = meu;
+      if (r.createdBy === dono.id) { r.createdBy = meuId; r.createdByName = meu; }
+      if (r.aprov) delete r.aprov;                // a equipe e a matrícula são as daqui, não as do outro CRM
+      delete r.matriculaId; delete r.matPend; delete r.matAuto;
+    }));
+  } catch (e) { console.warn('Elo online: backup', e); }
+};
+
+// ================== CONTAS (só o administrador) ==================
+let contas = null, contasFiltro = 'todas', contasBusca = '';
+function montarAdmin(){
+  const admin = !!(eu() && eu().admin);
+  let btn = document.getElementById('btnNavContas');
+  if (admin && !btn) {
+    const ref = document.getElementById('btnNavUsuarios');
+    if (ref) { btn = document.createElement('button'); btn.id = 'btnNavContas'; btn.textContent = '🔑 Contas'; btn.onclick = function(){ show('contas', this); }; ref.insertAdjacentElement('afterend', btn); }
+  }
+  if (btn) btn.style.display = admin ? '' : 'none';
+  const caixa = document.getElementById('addUserBtnContainer');
+  if (caixa && admin && !document.getElementById('eloOnBtnContas')) caixa.insertAdjacentHTML('afterbegin', '<button class="btn" id="eloOnBtnContas" style="margin-right:6px" onclick="show(\'contas\', document.getElementById(\'btnNavContas\'))">🔑 Contas</button>');
+}
+const mostrarOriginal = window.show;
+window.show = function(id, btn){
+  mostrarOriginal(id, btn);
+  if (id === 'contas') carregarContas();
+  if (id === 'configuracoes') ajustarConfiguracoes();
+  if (id === 'usuarios') montarAdmin();
+};
+async function carregarContas(){
+  const alvo = document.getElementById('eloOnContas'); if (!alvo) return;
+  if (!contas) alvo.innerHTML = '<p class="muted">Carregando as contas…</p>';
+  const r = await rpc('elo_admin_contas', {});
+  if (r.rede) { alvo.innerHTML = '<p class="muted">Sem internet agora. As contas aparecem quando você estiver online.</p>'; return; }
+  if (!r.j || r.j.erro) { alvo.innerHTML = '<p class="muted">Esta tela é só do administrador.</p>'; return; }
+  contas = r.j; pintarContas();
+}
+function situacao(c){
+  if (c.bloqueado) return ['bloqueado', 'Bloqueado', 'b-red'];
+  if (c.ativo === false) return ['desativado', 'Desativado pelo líder', 'b-gray'];
+  if (!c.entrou) return ['nunca', 'Ainda não entrou', 'b-gold'];
+  return ['ativo', 'Ativo', 'b-green'];
+}
+function vencido(c){ return !!c.pago_ate && c.pago_ate < new Date().toISOString().slice(0, 10); }
+function pintarContas(){
+  const alvo = document.getElementById('eloOnContas'); if (!alvo || !contas) return;
+  const hoje = new Date().toISOString().slice(0, 10);
+  const lista = contas.contas || [];
+  const conta = f => lista.filter(f).length;
+  const mb = (contas.banco_bytes || 0) / 1048576, limite = contas.banco_limite_mb || 500, pct = Math.min(100, Math.round(mb / limite * 100));
+  const busca = contasBusca.trim().toLowerCase();
+  const filtrada = lista.filter(c => {
+    const s = situacao(c)[0];
+    if (contasFiltro === 'bloqueadas' && s !== 'bloqueado') return false;
+    if (contasFiltro === 'ativas' && s !== 'ativo') return false;
+    if (contasFiltro === 'nunca' && s !== 'nunca') return false;
+    if (contasFiltro === 'vencidas' && !vencido(c)) return false;
+    return !busca || (c.nome + ' ' + c.email + ' ' + (c.cargo || '')).toLowerCase().includes(busca);
+  });
+  const quando = d => { if (!d) return '<span class="tc-sub">-</span>'; const x = new Date(d); return x.toLocaleDateString('pt-BR') + ' ' + horaCurta(x.getTime()); };
+  alvo.innerHTML = `
+    <div class="elo-on-resumo">
+      <div><b>${lista.length}</b><span>contas</span></div>
+      <div><b>${conta(c => situacao(c)[0] === 'ativo')}</b><span>ativas</span></div>
+      <div><b>${conta(c => situacao(c)[0] === 'nunca')}</b><span>ainda não entraram</span></div>
+      <div><b>${conta(c => c.bloqueado)}</b><span>bloqueadas</span></div>
+      <div><b>${conta(vencido)}</b><span>com pagamento vencido</span></div>
+      <div class="elo-on-banco"><b>${mb.toFixed(1).replace('.', ',')} MB</b><span>usados de ${limite} MB do banco (${pct}%)</span><i><em style="width:${pct}%;background:${pct > 85 ? '#dc2626' : (pct > 60 ? '#d97706' : '#16a34a')}"></em></i></div>
+    </div>
+    <div class="elo-on-barra">
+      <input type="text" placeholder="🔎 Buscar por nome, e-mail ou cargo..." value="${esc(contasBusca)}" oninput="eloOnContasBusca(this.value)">
+      <select onchange="eloOnContasFiltro(this.value)">
+        ${[['todas', 'Todas as contas'], ['ativas', 'Ativas'], ['nunca', 'Ainda não entraram'], ['vencidas', 'Pagamento vencido'], ['bloqueadas', 'Bloqueadas']].map(o => `<option value="${o[0]}" ${contasFiltro === o[0] ? 'selected' : ''}>${o[1]}</option>`).join('')}
+      </select>
+      <span class="tc-sub">${filtrada.length} de ${lista.length}</span>
+    </div>
+    <div style="overflow-x:auto"><table class="tabela-compacta"><thead><tr><th>Pessoa</th><th>Situação</th><th>Pago até</th><th>Último acesso e uso</th><th>Ações</th></tr></thead><tbody>
+    ${filtrada.slice(0, 300).map(c => { const s = situacao(c); return `<tr>
+      <td><b>${esc(c.nome)}</b>${c.admin ? ' <span class="tc-tag">administrador</span>' : ''}<span class="tc-sub"> · ${esc(c.cargo || 'Consultor')}${(c.lideres || []).length ? ' › ' + esc(c.lideres.join(', ')) : ''}</span><br><span class="tc-sub">${esc(c.email)}</span></td>
+      <td><span class="badge ${s[2]}">${s[1]}</span>${c.codigo_pendente ? '<br><span class="tc-sub">código de acesso válido</span>' : ''}</td>
+      <td><input type="date" value="${esc(c.pago_ate || '')}" onchange="eloOnContaPago('${c.id}', this.value)" style="width:140px;max-width:140px;margin:0;padding:6px 8px;font-size:12.5px;${vencido(c) ? 'border-color:#dc2626;color:#b91c1c;font-weight:700' : ''}"></td>
+      <td>${quando(c.ultimo_acesso)}<br><span class="tc-sub">${c.registros} registro(s) · ${c.vendas} venda(s)</span></td>
+      <td style="white-space:nowrap">${c.bloqueado ? `<button class="tc-btn forte" onclick="eloOnContaBloquear('${c.id}', false)">Liberar</button>` : (c.id === eu().id ? '<span class="tc-sub">você</span>' : `<button class="tc-btn perigo" onclick="eloOnContaBloquear('${c.id}', true)">Bloquear</button>`)}<button class="tc-btn" title="Gerar código de acesso (primeiro acesso ou senha nova)" onclick="eloOnGerarCodigo('${c.id}')">Código</button></td>
+    </tr>`; }).join('') || '<tr><td colspan="5" class="tc-sub" style="text-align:center;padding:14px">Nenhuma conta com esse filtro.</td></tr>'}
+    </tbody></table></div>
+    ${filtrada.length > 300 ? '<p class="tc-sub" style="margin-top:8px">Mostrando as 300 primeiras. Use a busca para achar as outras.</p>' : ''}`;
+}
+window.eloOnContasBusca = function(v){ contasBusca = v; clearTimeout(window.__eloOnT); window.__eloOnT = setTimeout(() => { pintarContas(); const i = document.querySelector('#eloOnContas .elo-on-barra input'); if (i) { i.focus(); i.setSelectionRange(v.length, v.length); } }, 250); };
+window.eloOnContasFiltro = function(v){ contasFiltro = v; pintarContas(); };
+async function definirConta(id, campos, textoOk){
+  const r = await rpc('elo_admin_definir', { p_pessoa: id, p: campos });
+  if (r.rede) return alert('Sem internet agora. Tente de novo quando estiver online.');
+  if (!r.j || r.j.erro) return alert({ nao_pode_se_bloquear: 'Você não pode bloquear a própria conta.', sem_permissao: 'Só o administrador altera as contas.' }[r.j && r.j.erro] || 'Não foi possível salvar agora.');
+  if (textoOk) aviso(textoOk, 'success');
+  carregarContas();
+}
+window.eloOnContaBloquear = function(id, bloquear){
+  const c = (contas.contas || []).find(x => x.id === id); if (!c) return;
+  if (bloquear && !confirm(`Bloquear ${c.nome}?\n\nEla não consegue mais usar o Elo CRM em nenhum aparelho até você liberar. Os dados dela continuam guardados.`)) return;
+  definirConta(id, { bloqueado: bloquear }, bloquear ? `${c.nome} foi bloqueado(a).` : `${c.nome} foi liberado(a).`);
+};
+window.eloOnContaPago = function(id, data){ definirConta(id, { pago_ate: data || '' }, 'Data de pagamento salva.'); };
+
+// ================== PARTIDA ==================
+function partida(){
+  ajustarTelaDeEntrada();
+  if (!logado()) {
+    // sem login válido: garante a tela de entrada (mesmo que haja dados guardados neste aparelho)
+    if (currentUser) { currentUser = null; try { localStorage.removeItem(`crm_active_user_${EQUIPE_ID}`); } catch (e) {} const a = document.getElementById('authScreen'); if (a) a.style.display = 'flex'; }
+    atualizarSelo(); conferirBanco(); return;
+  }
+  try { localStorage.setItem(`crm_login_timestamp_${EQUIPE_ID}`, String(Date.now())); } catch (e) {}
+  if (!currentUser) { const p = lerJson(`crm_active_user_${EQUIPE_ID}`, null) || (usersList || []).find(u => u.id === eu().id); if (p) { currentUser = (usersList || []).find(u => u.id === p.id) || p; try { initAuth(); } catch (e) {} } }
+  montarAdmin(); ajustarConfiguracoes(); atualizarSelo();
+  if (primeiraCarga) { const f = document.createElement('div'); f.id = 'eloOnCarga'; f.className = 'elo-on-carga'; f.textContent = '⏳ Baixando seus dados da nuvem…'; document.body.appendChild(f); }
+  // fecha a janela -> atualiza a tela com o que chegou enquanto ela estava aberta
+  const fecharOriginal = window.closeModal;
+  window.closeModal = function(){ fecharOriginal.apply(this, arguments); if (pendenteDeTela) { pendenteDeTela = false; try { renderAll(); updateUserInterface(); } catch (e) {} } };
+  ligarRelogio();
+  setTimeout(() => sincronizar({ motivo: 'abrir' }), 400);
+}
+window.eloOnEstado = () => ({ logado: logado(), rodando, ultimoErro, bloqueio, rev: meta.rev, pendencias: pendencias(), quando: meta.quando });
+window.eloOnEsperar = async function(){ for (let i = 0; i < 200; i++) { if (!rodando && !espera && !deNovo) return true; await new Promise(ok => setTimeout(ok, 100)); } return false; };
+partida();
 })();
 </script>
 </body>
