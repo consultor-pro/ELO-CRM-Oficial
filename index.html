@@ -20077,6 +20077,9 @@ function partida(){
   }
   try { localStorage.setItem(`crm_login_timestamp_${EQUIPE_ID}`, String(Date.now())); } catch (e) {}
   if (!currentUser) { const p = lerJson(`crm_active_user_${EQUIPE_ID}`, null) || (usersList || []).find(u => u.id === eu().id); if (p) { currentUser = (usersList || []).find(u => u.id === p.id) || p; try { initAuth(); } catch (e) {} } }
+  // a tela foi desenhada antes de este bloco entrar: redesenha agora, já com as regras do online
+  // (sem isto o administrador via "Sem permissão para adicionar membros" até chegar alguma novidade do banco)
+  try { hierLimparCache(); updateUserInterface(); renderAll(); } catch (e) {}
   montarAdmin(); ajustarConfiguracoes(); atualizarSelo();
   if (eloOnSouAdmin()) pedir('/rest/v1/rpc/elo_versao', { metodo: 'GET', espera: 12000 }).then(r => { if (r.ok && r.j && r.j.elo === 'ok' && (r.j.versao || 1) < BANCO_VERSAO) aviso('O banco na Supabase está numa versão antiga. Cole o texto novo de instalação no SQL Editor para atualizar.', 'warn'); });
   if (primeiraCarga) { const f = document.createElement('div'); f.id = 'eloOnCarga'; f.className = 'elo-on-carga'; f.textContent = '⏳ Baixando seus dados da nuvem…'; document.body.appendChild(f); }
