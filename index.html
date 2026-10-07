@@ -19040,7 +19040,7 @@ if (typeof ELO_ONLINE === 'undefined' || !ELO_ONLINE) return;
 const URL_BASE = ELO_ON.url.replace(/\/+$/, '');
 const CHAVE = ELO_ON.chave;
 const K_SESSAO = 'elo_on_sessao', K_CONTA = 'elo_on_conta';
-const BANCO_VERSAO = 2;      // versão do texto de instalação que esta versão do CRM espera encontrar na Supabase
+const BANCO_VERSAO = 3;      // versão do texto de instalação que esta versão do CRM espera encontrar na Supabase
 const K_META = 'crm_on_meta_' + EQUIPE_ID;
 const eu = () => eloOnConta();
 const logado = () => !!(eu() && lerSessao());
@@ -19915,6 +19915,63 @@ window.eloOnAdotarBackup = function(data, dbImp){
   } catch (e) { console.warn('Elo online: backup', e); }
 };
 
+// ================== RESULTADO DA LOJA (só Dono de Loja e Diretor daquela loja) ==================
+// Os números da loja inteira, inclusive de equipes que não são da pessoa: quantas vendas e quanto cada um vendeu.
+// Vêm direto do banco na hora (não ficam guardados no aparelho) e nunca trazem cliente, grupo, cota nem recebimentos.
+let lojaSel = '', lojaPeriodo = 'mes', lojaDados = null, lojaPedido = 0;
+function lojasQueMando(){
+  if (!currentUser) return [];
+  const ids = [...new Set(hierVinculos(currentUser).filter(v => v.loja && hierNivel(v.cargo) <= 1).map(v => v.loja))];
+  return ids.map(id => ({ id, nome: hierLojaNome(id) })).filter(l => l.nome).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+}
+function lojaIntervalo(){
+  const h = new Date(), iso = d => d.toISOString();
+  if (lojaPeriodo === 'mes') return [iso(new Date(h.getFullYear(), h.getMonth(), 1)), iso(new Date(h.getFullYear(), h.getMonth() + 1, 1))];
+  if (lojaPeriodo === 'mesPassado') return [iso(new Date(h.getFullYear(), h.getMonth() - 1, 1)), iso(new Date(h.getFullYear(), h.getMonth(), 1))];
+  if (lojaPeriodo === 'ano') return [iso(new Date(h.getFullYear(), 0, 1)), iso(new Date(h.getFullYear() + 1, 0, 1))];
+  return [null, null];
+}
+function lojaCartao(){
+  const pagina = document.getElementById('semaforo'); if (!pagina) return;
+  const lojas = lojasQueMando(); let c = document.getElementById('eloOnLojaCard');
+  if (!lojas.length) { if (c) c.style.display = 'none'; return; }
+  if (!c) { c = document.createElement('div'); c.id = 'eloOnLojaCard'; c.className = 'card'; c.style.marginBottom = '16px'; pagina.insertAdjacentElement('afterbegin', c); }
+  c.style.display = '';
+  if (!lojas.some(l => l.id === lojaSel)) { lojaSel = lojas[0].id; lojaDados = null; }
+  const periodos = [['mes', 'Este mês'], ['mesPassado', 'Mês passado'], ['ano', 'Este ano'], ['tudo', 'Todo o período']];
+  let corpo = '<p class="muted" style="margin:10px 0 0">Carregando os números da loja…</p>';
+  if (lojaDados && lojaDados.erroTexto) corpo = `<p class="muted" style="margin:10px 0 0">${esc(lojaDados.erroTexto)}</p>`;
+  else if (lojaDados) {
+    const minha = new Set([currentUser.id, ...hierAbaixoDe(currentUser.id).keys()]);
+    const venderam = lojaDados.pessoas.filter(p => p.n > 0), zerados = lojaDados.pessoas.length - venderam.length;
+    corpo = `<div class="elo-on-resumo" style="margin:12px 0 10px">
+        <div><b>${Number(lojaDados.vendas)}</b><span>venda(s) na loja</span></div>
+        <div><b>${esc(hierMoeda(lojaDados.volume))}</b><span>volume da loja</span></div>
+        <div><b>${Number(lojaDados.venderam)}</b><span>pessoa(s) venderam</span></div>
+        <div><b>${zerados}</b><span>sem venda no período</span></div></div>
+      <div style="overflow-x:auto;max-height:420px;overflow-y:auto"><table class="tabela-compacta"><thead><tr><th>Pos.</th><th>Pessoa</th><th style="text-align:right">Vendas</th><th style="text-align:right">Volume (R$)</th><th>Cargo · líder na loja</th><th>Equipe</th></tr></thead><tbody>
+      ${lojaDados.pessoas.map((p, i) => `<tr${p.n ? '' : ' style="opacity:.6"'}><td>${p.n ? (i + 1) + 'º' : '-'}</td><td><b>${esc(p.nome || 'Sem cadastro')}</b></td><td style="text-align:right">${Number(p.n)}</td><td style="text-align:right;font-weight:700">${esc(hierMoeda(p.vol))}</td><td><span class="tc-sub">${esc(p.cargo || '-')}${p.lider ? ' › ' + esc(p.lider) : ''}</span></td><td>${p.id && minha.has(p.id) ? '<span class="tc-tag">sua equipe</span>' : '<span class="tc-sub">outra equipe</span>'}</td></tr>`).join('') || '<tr><td colspan="6" class="tc-sub" style="text-align:center;padding:14px">Ninguém cadastrado nesta loja.</td></tr>'}
+      </tbody></table></div>`;
+  }
+  c.innerHTML = `<div class="between" style="gap:10px;flex-wrap:wrap"><div><h2 style="margin:0">🏬 Resultado da loja</h2><small class="muted">Os números da loja inteira, inclusive de quem não é da sua equipe. Só o Dono de Loja e os Diretores da loja veem este quadro. Clientes, grupos e cotas das outras equipes não aparecem.</small></div>
+      <div class="row" style="gap:8px;flex-wrap:wrap">
+        <select onchange="eloOnLojaMudar('loja', this.value)" style="max-width:230px;margin:0" ${lojas.length > 1 ? '' : 'disabled'}>${lojas.map(l => `<option value="${esc(l.id)}" ${l.id === lojaSel ? 'selected' : ''}>${esc(l.nome)}</option>`).join('')}</select>
+        <select onchange="eloOnLojaMudar('periodo', this.value)" style="max-width:170px;margin:0">${periodos.map(o => `<option value="${o[0]}" ${o[0] === lojaPeriodo ? 'selected' : ''}>${o[1]}</option>`).join('')}</select>
+        <button class="btn" onclick="eloOnLojaMudar()">Atualizar</button></div></div>${corpo}`;
+}
+async function lojaBuscar(){
+  if (!lojasQueMando().length) return lojaCartao();
+  lojaCartao(); const meu = ++lojaPedido; const [de, ate] = lojaIntervalo();
+  const r = await rpc('elo_loja_resultado', { p_loja: lojaSel, p_de: de, p_ate: ate });
+  if (meu !== lojaPedido) return;
+  if (r.rede) lojaDados = { erroTexto: 'Sem internet agora. Os números da loja aparecem quando você estiver online.' };
+  else if (r.falha) lojaDados = { erroTexto: r.status === 404 ? 'O banco na Supabase precisa ser atualizado para mostrar este quadro. Avise o administrador.' : 'Não foi possível buscar os números da loja agora.' };
+  else if (!r.j || r.j.erro) lojaDados = { erroTexto: 'Este quadro é só para o Dono de Loja e os Diretores desta loja.' };
+  else lojaDados = r.j;
+  lojaCartao();
+}
+window.eloOnLojaMudar = function(campo, valor){ if (campo === 'loja') lojaSel = valor; if (campo === 'periodo') lojaPeriodo = valor; lojaDados = null; lojaBuscar(); };
+
 // ================== CONTAS (só o administrador) ==================
 let contas = null, contasFiltro = 'todas', contasBusca = '';
 function montarAdmin(){
@@ -19932,6 +19989,7 @@ const mostrarOriginal = window.show;
 window.show = function(id, btn){
   mostrarOriginal(id, btn);
   if (id === 'contas') carregarContas();
+  if (id === 'semaforo') { lojaDados = null; lojaBuscar(); }
   if (id === 'configuracoes') ajustarConfiguracoes();
   if (id === 'usuarios') montarAdmin();
 };
