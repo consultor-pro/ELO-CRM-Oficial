@@ -19040,7 +19040,7 @@ if (typeof ELO_ONLINE === 'undefined' || !ELO_ONLINE) return;
 const URL_BASE = ELO_ON.url.replace(/\/+$/, '');
 const CHAVE = ELO_ON.chave;
 const K_SESSAO = 'elo_on_sessao', K_CONTA = 'elo_on_conta';
-const BANCO_VERSAO = 3;      // versão do texto de instalação que esta versão do CRM espera encontrar na Supabase
+const BANCO_VERSAO = 4;      // versão do texto de instalação que esta versão do CRM espera encontrar na Supabase
 const K_META = 'crm_on_meta_' + EQUIPE_ID;
 const eu = () => eloOnConta();
 const logado = () => !!(eu() && lerSessao());
@@ -19248,7 +19248,7 @@ window.changeUserPassword = async function(){
 
 // ================== O QUE SOBE E O QUE DESCE ==================
 // vendas: o que quem está acima enxerga (resumo). Todo o resto da venda são os recebimentos (fin).
-const RESUMO = ['id', 'leadId', 'lead', 'responsavel', 'segmento', 'modalidadeParcela', 'prazoContrato', 'valor', 'grupo', 'cota', 'date', 'loja', 'aprov', 'matriculaId', 'matPend', 'matAuto', 'cancelada', 'contemplada'];
+const RESUMO = ['id', 'leadId', 'lead', 'responsavel', 'segmento', 'modalidadeParcela', 'prazoContrato', 'valor', 'grupo', 'cota', 'date', 'loja', 'aprov', 'matriculaId', 'matPend', 'matAuto', 'cancelada', 'contemplada', 'particular'];
 function partirVenda(s){
   const r = {}, f = {};
   Object.keys(s).forEach(k => { if (k.charAt(0) === '_' && k !== '_backupImportId') return; (RESUMO.includes(k) ? r : f)[k] = s[k]; });
@@ -19348,6 +19348,8 @@ function levantarMudancas(){
     if (!s || typeof s !== 'object') return;
     if (!s.id) s.id = novoId();
     vistosV.add(String(s.id));
+    // venda "só minha" (de antes da equipe atual): não leva a equipe de hoje no carimbo
+    if (s.particular === true) soMinha(s);
     const mv = meta.h.v[s.id]; const h = marca(s);
     if (mv && mv[0] === h) return;
     if (mv && !mv[1] && !(typeof hierVeFinanceiro === 'function' && hierVeFinanceiro(s))) return;   // só vejo o resumo: não mando
@@ -19504,7 +19506,12 @@ function aplicarAvisos(lista){
 function aplicarSaidas(lista){
   let mudou = false;
   (lista || []).forEach(s => {
-    if (s.t === 'v') { const i = (db.sales || []).findIndex(q => String(q.id) === s.k); if (i >= 0 && !(meta.h.v[s.k] && meta.h.v[s.k][1])) { db.sales.splice(i, 1); mudou = true; delete meta.h.v[s.k]; } }
+    if (s.t === 'v') {
+      // a venda saiu da minha visão (trocaram a matrícula, ou quem vendeu deixou "só para ele"): sai da tela. Venda que eu mesmo vendi nunca é tirada daqui.
+      const i = (db.sales || []).findIndex(q => String(q.id) === s.k); if (i < 0) return;
+      const q = db.sales[i], minha = (typeof hierVendedorId === 'function' ? hierVendedorId(q) : null) === eu().id || (currentUser && q.responsavel === currentUser.nome);
+      if (!minha) { db.sales.splice(i, 1); mudou = true; delete meta.h.v[s.k]; }
+    }
     else if (s.t === 'i') {
       const [t, d, id] = s.k.split('|'); if (d === eu().id) return;
       const col = COLECOES.find(c => c.t === t); if (!col) return;
@@ -19753,7 +19760,7 @@ window.eloOnPintarCartao = function(){
   cartao.innerHTML = `<h2>☁️ Elo CRM online</h2>
     <p class="muted" style="font-size:13px;margin-bottom:10px">Tudo o que você cadastra é guardado neste aparelho e enviado para a nuvem. Entrando com o seu e-mail em outro aparelho, seus dados aparecem lá também.</p>
     <div id="eloNuvemStatus" style="font-size:13px;font-weight:700;margin-bottom:12px">${esc((eu() || {}).email || '')} · ${ultimoErro === 'rede' || navigator.onLine === false ? 'sem internet agora' : (meta.quando ? 'sincronizado às ' + horaCurta(meta.quando) : 'ainda não sincronizou')}${n ? ' · ' + n + ' alteração(ões) para enviar' : ''}</div>
-    <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn primary" onclick="eloOnSincronizarAgora()">🔄 Sincronizar agora</button><button class="btn" onclick="eloOnConferirTudo()">Conferir tudo com a nuvem</button><button class="btn" onclick="logout()">Sair deste aparelho</button></div>`;
+    <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn primary" onclick="eloOnSincronizarAgora()">🔄 Sincronizar agora</button><button class="btn" onclick="eloOnConferirTudo()">Conferir tudo com a nuvem</button><button class="btn" onclick="eloOnAbrirParticulares()">Vendas de antes da equipe atual</button><button class="btn" onclick="logout()">Sair deste aparelho</button></div>`;
 };
 window.eloAtualizarCardNuvem = function(){ try { window.eloOnPintarCartao(); } catch (e) {} };
 function ajustarConfiguracoes(){
@@ -19896,6 +19903,81 @@ window.abrirPublicacaoInfo = function(id){
     if (tit) tit.insertAdjacentHTML('afterend', `<small class="muted" style="display:block">${autor ? 'Publicado por ' + esc(autor.nome) : 'Aviso da administração do Elo CRM'}</small>`);
   }
 };
+// "31/12/2025" -> "2025-12-31" (vazio se não for uma data)
+function lerDataBr(t){
+  const m = String(t || '').trim().match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2}|\d{4})$/); if (!m) return '';
+  const dia = +m[1], mes = +m[2], ano = m[3].length === 2 ? 2000 + (+m[3]) : +m[3];
+  const d = new Date(ano, mes - 1, dia); if (d.getFullYear() !== ano || d.getMonth() !== mes - 1 || d.getDate() !== dia) return '';
+  return ano + '-' + String(mes).padStart(2, '0') + '-' + String(dia).padStart(2, '0');
+}
+// ================== VENDAS DE ANTES DA EQUIPE ATUAL ("só minhas") ==================
+// Quem mudou de gestor (ou vendeu em outra matrícula) traz o histórico sem mostrar para a equipe de hoje:
+// a venda marcada como "só minha" continua nos números e nas comissões da própria pessoa, e ninguém acima recebe.
+// venda "só minha": sem a equipe de hoje no carimbo e na matrícula de quem vendeu (nunca na do líder atual)
+function soMinha(s){
+  if (s.aprov && Array.isArray(s.aprov.cadeia) && s.aprov.cadeia.length) s.aprov.cadeia = [];
+  const vid = (typeof hierVendedorId === 'function' ? hierVendedorId(s) : null) || (currentUser && s.responsavel === currentUser.nome ? currentUser.id : null);
+  if (vid && s.matriculaId !== vid) s.matriculaId = vid;
+  if (s.matPend) delete s.matPend; if (s.matAuto) delete s.matAuto;
+}
+function minhasVendas(){ return (db.sales || []).filter(s => s && currentUser && ((typeof hierVendedorId === 'function' ? hierVendedorId(s) : null) === currentUser.id || s.responsavel === currentUser.nome)); }
+// na lista de vendas, a venda "só minha" leva um aviso (e um toque nele abre a janela para mudar)
+const seloMatriculaAntes = window.hierSeloMatricula;
+window.hierSeloMatricula = function(s){
+  const antes = typeof seloMatriculaAntes === 'function' ? seloMatriculaAntes(s) : '';
+  return antes + (s && s.particular === true ? ' <span class="badge b-blue" style="cursor:pointer" title="Só você vê esta venda. Toque para mudar." onclick="eloOnAbrirParticulares()">🔒 só minha</span>' : '');
+};
+window.eloOnAbrirParticulares = function(){
+  const todas = minhasVendas().slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))), part = todas.filter(s => s.particular === true).length;
+  const dia = s => { const d = String(s.date || '').slice(0, 10); return d ? d.split('-').reverse().join('/') : 'sem data'; };
+  const linhas = todas.map(s => `<label style="display:flex;gap:8px;align-items:center;padding:6px 4px;border-bottom:1px solid var(--line,rgba(128,128,128,.25));font-size:13px;cursor:pointer">
+      <input type="checkbox" class="elo-part-cx" data-id="${esc(String(s.id))}" data-dia="${esc(String(s.date || '').slice(0, 10))}" ${s.particular === true ? 'checked' : ''} onchange="eloOnPartConta()" style="width:auto;flex:0 0 auto">
+      <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${dia(s)} · ${esc(s.lead || 'Cliente')}</span><b style="flex:0 0 auto">${hierMoeda(s.valor)}</b></label>`).join('');
+  openModal(`<div class="between"><h2 style="margin:0">Vendas de antes da equipe atual</h2><button class="btn" onclick="closeModal()">✕</button></div>
+    <p class="muted" style="font-size:13px;margin:8px 0 12px">Vendas que você fez com outro gestor, ou em outra matrícula, podem ficar <b>só para você</b>: continuam nos seus números e nas suas comissões, mas quem está acima de você hoje não vê e elas não entram nos números da loja.</p>
+    <p style="font-size:13px;margin:0 0 12px">Hoje: <b>${todas.length}</b> venda(s) suas · <b>${part}</b> só para você · <b>${todas.length - part}</b> aparecem para a equipe.</p>
+    ${todas.length ? `<div class="field"><label>Marcar de uma vez as vendas anteriores a</label>
+      <div class="row" style="gap:8px;flex-wrap:wrap"><input type="date" id="eloPartData" style="flex:1;min-width:150px"><button class="btn" onclick="eloOnPartMarcar('data')">Marcar anteriores</button></div></div>
+    <div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:8px"><button class="btn" onclick="eloOnPartMarcar('todas')">Marcar todas</button><button class="btn" onclick="eloOnPartMarcar('nenhuma')">Desmarcar todas</button></div>
+    <small class="muted" style="display:block;margin-bottom:4px">Marcada = fica <b>só para você</b>. Desmarcada = aparece para a sua equipe de hoje.</small>
+    <div style="max-height:260px;overflow:auto;border:1px solid var(--line,rgba(128,128,128,.25));border-radius:10px;padding:2px 8px">${linhas}</div>
+    <p id="eloPartConta" class="muted" style="font-size:13px;margin:10px 0"></p>
+    <div class="row" style="gap:8px;justify-content:flex-end"><button class="btn" onclick="closeModal()">Cancelar</button><button class="btn primary" onclick="eloOnAplicarParticulares('lista')">Salvar</button></div>` : '<p class="muted">Você ainda não tem vendas lançadas aqui.</p>'}`);
+  eloOnPartConta();
+};
+window.eloOnPartConta = function(){
+  const cx = [...document.querySelectorAll('.elo-part-cx')], n = cx.filter(c => c.checked).length, el = document.getElementById('eloPartConta');
+  if (el) el.innerHTML = `Ao salvar: <b>${n}</b> só para você · <b>${cx.length - n}</b> aparecem para a equipe.`;
+};
+window.eloOnPartMarcar = function(modo){
+  let corte = '';
+  if (modo === 'data') { corte = document.getElementById('eloPartData')?.value || ''; if (!corte) return alert('Escolha a data.'); }
+  document.querySelectorAll('.elo-part-cx').forEach(c => { c.checked = modo === 'todas' ? true : modo === 'nenhuma' ? false : (!!c.dataset.dia && c.dataset.dia < corte); });
+  eloOnPartConta();
+};
+window.eloOnAplicarParticulares = function(modo){
+  // modo 'lista': vale o que está marcado na janela. Os outros modos ('todas' = mostrar todas, 'nenhuma' = esconder todas, 'data') servem para aplicar direto.
+  let corte = '', marcadas = null;
+  if (modo === 'data') { corte = document.getElementById('eloPartData')?.value || ''; if (!corte) return alert('Escolha a data.'); }
+  if (modo === 'lista') { marcadas = {}; document.querySelectorAll('.elo-part-cx').forEach(c => { marcadas[c.dataset.id] = c.checked; }); }
+  let esconde = 0, mostra = 0;
+  minhasVendas().forEach(s => {
+    if (marcadas && !(String(s.id) in marcadas)) return;
+    const particular = marcadas ? marcadas[String(s.id)] : (modo === 'nenhuma' || (modo === 'data' && String(s.date || '').slice(0, 10) < corte));
+    if (particular && s.particular !== true) { s.particular = true; soMinha(s); esconde++; }
+    else if (!particular && s.particular === true) {
+      delete s.particular;
+      try {
+        if (typeof hierAutorizado === 'function' && !hierAutorizado(currentUser)) delete s.matriculaId;   // volta para a matrícula de quem está acima
+        hierCarimbar(s, null, true); if (typeof hierMatriculaLegado === 'function') hierMatriculaLegado(s);
+      } catch (e) {}
+      mostra++;
+    }
+  });
+  save(); closeModal();
+  aviso(esconde || mostra ? `${esconde} venda(s) passaram a ficar só para você e ${mostra} voltaram a aparecer para a equipe.` : 'Nada mudou: as vendas já estavam assim.', 'success');
+};
+
 // backup de outro CRM: os registros do dono daquele CRM passam a ser meus aqui (o nome dele vira o meu)
 window.eloOnAdotarBackup = function(data, dbImp){
   try {
@@ -19905,6 +19987,18 @@ window.eloOnAdotarBackup = function(data, dbImp){
     const dono = lista.find(u => u && u.id === 'u_WC') || lista.find(u => u && !u.superiorId) || lista[0];
     if (!dono || !dono.nome) return;
     const meu = currentUser.nome, meuId = currentUser.id;
+    // Vendas de antes da equipe atual (feitas com outro gestor ou em outra matrícula) não devem aparecer para a equipe de hoje.
+    let corte = null;
+    if ((dbImp.sales || []).length && typeof hierTemLider === 'function' && hierTemLider(meuId)) {
+      for (;;) {
+        const resp = prompt(`Este backup tem ${dbImp.sales.length} venda(s).\n\nAs vendas de ANTES da sua equipe atual ficam só para você: seu líder não vê.\n\nA partir de que data as vendas devem aparecer para a sua equipe de hoje?\nDigite a data (dia/mês/ano). Deixe em branco para NENHUMA venda deste backup aparecer para a equipe.`, '');
+        if (resp === null || !resp.trim()) { corte = 'nenhuma'; break; }
+        const d = lerDataBr(resp);
+        if (d) { corte = d; break; }
+        alert('Não entendi a data. Use dia/mês/ano, por exemplo 01/08/2026.');
+      }
+    }
+    (dbImp.sales || []).forEach(s => { if (!s || !corte) return; if (corte === 'nenhuma' || String(s.date || '').slice(0, 10) < corte) s.particular = true; else delete s.particular; });
     ['leads', 'meetings', 'followups', 'sales'].forEach(k => (dbImp[k] || []).forEach(r => {
       if (!r) return;
       if (r.responsavel === dono.nome) r.responsavel = meu;
@@ -19912,6 +20006,7 @@ window.eloOnAdotarBackup = function(data, dbImp){
       if (r.aprov) delete r.aprov;                // a equipe e a matrícula são as daqui, não as do outro CRM
       delete r.matriculaId; delete r.matPend; delete r.matAuto;
     }));
+    (dbImp.sales || []).forEach(s => { if (s && s.particular === true && s.responsavel === meu) s.matriculaId = meuId; });
   } catch (e) { console.warn('Elo online: backup', e); }
 };
 
