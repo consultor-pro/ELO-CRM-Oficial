@@ -2564,6 +2564,8 @@ const ELO_ONLINE = !!(ELO_ON.url && ELO_ON.chave) && !urlParams.has('local');
 function eloOnConta(){
   try { if (!localStorage.getItem('elo_on_sessao')) return null; return JSON.parse(localStorage.getItem('elo_on_conta') || 'null'); } catch (e) { return null; }
 }
+// A conta de administrador só administra: cadastra e acerta a equipe de todos, cria lojas e cuida das contas.
+function eloOnSouAdmin(){ const c = ELO_ONLINE ? eloOnConta() : null; return !!(c && c.admin); }
 // Online, cada conta tem a própria gaveta neste aparelho: duas pessoas no mesmo computador nunca se misturam.
 const EQUIPE_ID = ELO_ONLINE ? ('elo_on_' + ((eloOnConta() || {}).id || 'entrada')) : (urlParams.get('equipe') || GAVETA_FIXA || gavetaPeloEndereco());
 
@@ -4754,7 +4756,7 @@ function hierVincMudar(userId, i, campo, valor){
   v[campo] = valor;
   // se o líder escolhido não serve mais para essa loja e esse cargo, troca pelo primeiro que serve
   const lideres = hierLideresPossiveis(u, v.loja, v.cargo);
-  if (!lideres.some(o => o.id === v.liderId)) v.liderId = lideres.some(o => o.id === currentUser.id) ? currentUser.id : ((lideres[0] || {}).id || '');
+  if (!(eloOnSouAdmin() && !v.liderId) && !lideres.some(o => o.id === v.liderId)) v.liderId = lideres.some(o => o.id === currentUser.id) ? currentUser.id : ((lideres[0] || {}).id || '');
   hierRenderVinculos(userId);
 }
 function hierRenderVinculos(userId){
@@ -4773,7 +4775,7 @@ function hierRenderVinculos(userId){
       </select>
       <span class="tc-sub">líder:</span>
       <select class="hmVincLider" title="Líder nesta loja" onchange="hierVincMudar('${u.id}', ${i}, 'liderId', this.value)">
-        ${lideres.map(o => `<option value="${o.id}" ${o.id === v.liderId ? 'selected' : ''}>${esc(o.nome)} (${esc(hierCargoNaLoja(o, v.loja))})</option>`).join('') || '<option value="">Ninguém com cargo acima nesta loja</option>'}
+        ${(eloOnSouAdmin() ? `<option value="" ${v.liderId ? '' : 'selected'}>— Sem líder (fica no topo) —</option>` : '') + lideres.map(o => `<option value="${o.id}" ${o.id === v.liderId ? 'selected' : ''}>${esc(o.nome)} (${esc(hierCargoNaLoja(o, v.loja))})</option>`).join('') || '<option value="">Ninguém com cargo acima nesta loja</option>'}
       </select>
       ${i === 0 ? '<span class="tc-tag" title="Loja, cargo e líder principais">principal</span>' : `<button class="tc-btn perigo" onclick="window.__hmVinc.splice(${i},1); hierRenderVinculos('${u.id}')">remover</button>`}
     </div>`;
@@ -4837,13 +4839,13 @@ function hierSalvarMembro(userId){
   const nomeAntigo = u.nome;
   const linhas = window.__hmVinc || [];
   const vinc = linhas.map(v => ({ loja: v.loja || '', cargo: v.cargo || 'Consultor', liderId: v.liderId || null }));
-  if (!vinc.some(v => v.liderId)) return alert('A pessoa precisa de pelo menos um líder.');
+  if (!vinc.some(v => v.liderId) && !eloOnSouAdmin()) return alert('A pessoa precisa de pelo menos um líder.');
   const repetido = vinc.find((v, i) => vinc.findIndex(x => x.loja === v.loja && x.liderId === v.liderId) !== i);
   if (repetido) return alert('Há duas linhas iguais (mesma loja e mesmo líder). Remova uma delas.');
   for (let i = 0; i < linhas.length; i++) {
     const v = linhas[i]; if (v.fixo) continue;
     const nomeLoja = hierLojaNome(v.loja) || 'sem loja';
-    if (!v.liderId || !hierLideresPossiveis(u, v.loja, v.cargo).some(o => o.id === v.liderId))
+    if (!(eloOnSouAdmin() && !v.liderId) && (!v.liderId || !hierLideresPossiveis(u, v.loja, v.cargo).some(o => o.id === v.liderId)))
       return alert(`Na linha "${nomeLoja}": o líder precisa ter, nessa loja, cargo acima de ${v.cargo}. Escolha outro líder ou outro cargo.`);
     // quem ela lidera nessa loja precisa continuar com cargo abaixo do dela
     const acimaDela = (usersList || []).find(w => w.id !== u.id && hierVinculos(w).some(x => x.liderId === u.id && (x.loja || '') === (v.loja || '') && hierNivel(x.cargo) <= hierNivel(v.cargo)));
@@ -19011,6 +19013,7 @@ if (typeof ELO_ONLINE === 'undefined' || !ELO_ONLINE) return;
 const URL_BASE = ELO_ON.url.replace(/\/+$/, '');
 const CHAVE = ELO_ON.chave;
 const K_SESSAO = 'elo_on_sessao', K_CONTA = 'elo_on_conta';
+const BANCO_VERSAO = 2;      // versão do texto de instalação que esta versão do CRM espera encontrar na Supabase
 const K_META = 'crm_on_meta_' + EQUIPE_ID;
 const eu = () => eloOnConta();
 const logado = () => !!(eu() && lerSessao());
@@ -19767,6 +19770,7 @@ window.eloOnGerarCodigo = async function(userId){
 // janela "Adicionar Novo Membro": sem senha (a pessoa cria a dela) e com o e-mail de verdade
 const novoMembroOriginal = window.openNewUserModal;
 window.openNewUserModal = function(){
+  if (eloOnSouAdmin()) return adminNovaPessoa();
   novoMembroOriginal();
   const senha = document.getElementById('nuPass'); if (senha) { const f = senha.closest('.field'); if (f) f.style.display = 'none'; }
   const em = document.getElementById('nuEmail');
@@ -19780,6 +19784,75 @@ window.saveNewUser = function(){
   salvarMembroOriginal();
   if (usersList.length > antes) { if (espera) { clearTimeout(espera); espera = null; } sincronizar(); }   // sobe já, para o código de acesso aparecer
 };
+// ================== ADMINISTRADOR ==================
+// A conta de administrador só administra: enxerga o cadastro de todos, põe cada pessoa na loja e abaixo do líder certos,
+// cria lojas e cuida das contas. Ela não é líder de ninguém (por isso não aparece para os outros) e não recebe leads nem vendas de ninguém.
+const abaixoOriginal = window.hierAbaixoDe; let cacheAdmin = null;
+window.hierAbaixoDe = function(id){
+  if (!eloOnSouAdmin() || !currentUser || id !== currentUser.id) return abaixoOriginal(id);
+  if (cacheAdmin && cacheAdmin.ref === usersList && cacheAdmin.n === usersList.length) return cacheAdmin.m;
+  const m = new Map();
+  (usersList || []).forEach(w => { if (!w || w.id === id) return; const lj = hierLojasDe(w); m.set(w.id, new Set(lj.length ? lj.concat(['']) : [''])); });
+  cacheAdmin = { ref: usersList, n: usersList.length, m }; return m;
+};
+const limparCacheOriginal = window.hierLimparCache;
+window.hierLimparCache = function(){ cacheAdmin = null; return limparCacheOriginal.apply(this, arguments); };
+const podeGerirOriginal = window.canCurrentUserManageMembers;
+window.canCurrentUserManageMembers = function(){ return eloOnSouAdmin() || podeGerirOriginal(); };
+const cargosOriginal = window.hierCargosQuePossoDar;
+window.hierCargosQuePossoDar = function(){ return eloOnSouAdmin() ? ROLES.slice() : cargosOriginal(); };
+const equipeOriginal = window.renderUsers;
+window.renderUsers = function(){
+  const r = equipeOriginal.apply(this, arguments);
+  if (eloOnSouAdmin()) { const f = document.querySelector('#usuarios .hier-linha-equipe'); if (f) f.innerHTML = `<span><b>Você é o administrador.</b> Aqui aparece o cadastro de todos (${Math.max(0, (usersList || []).length - 1)} pessoa(s)). Esta conta não aparece para ninguém e não recebe leads nem vendas de ninguém.</span>`; }
+  return r;
+};
+function adminLideresPossiveis(loja, cargo){
+  return equipeVisivelAtiva().filter(o => o.id !== currentUser.id && hierNivel(hierCargoNaLoja(o, loja)) < hierNivel(cargo))
+    .sort((a, b) => hierNivel(hierCargoNaLoja(a, loja)) - hierNivel(hierCargoNaLoja(b, loja)) || (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
+}
+window.eloOnAdminLideres = function(){
+  const sel = document.getElementById('anLider'); if (!sel) return;
+  const cargo = document.getElementById('anCargo').value, loja = document.getElementById('anLoja').value, atual = sel.value;
+  const lista = adminLideresPossiveis(loja, cargo);
+  sel.innerHTML = '<option value="">— Sem líder (fica no topo) —</option>' + lista.map(o => `<option value="${o.id}">${esc(o.nome)} (${esc(hierCargoNaLoja(o, loja))}${hierNomesLojas(o) ? ' · ' + esc(hierNomesLojas(o)) : ''})</option>`).join('');
+  if (atual && lista.some(o => o.id === atual)) sel.value = atual;
+  else sel.value = (hierNivel(cargo) === 0 || !lista.length) ? '' : lista[0].id;
+};
+function adminNovaPessoa(){
+  openModal(`
+    <div class="between"><h2 style="margin:0">Adicionar pessoa</h2><button class="btn" onclick="closeModal()">✕</button></div>
+    <p class="muted" style="font-size:13px;margin:8px 0 12px">Você é o administrador: pode pôr a pessoa em qualquer loja e abaixo de qualquer líder. Quem fica no topo de uma loja (por exemplo, o Dono de Loja) entra <b>sem líder</b>.</p>
+    <div class="field"><label>Nome completo</label><input id="anNome" placeholder="Nome e sobrenome"></div>
+    <div class="field"><label>E-mail da pessoa (é com ele que ela entra)</label><input type="email" id="anEmail" placeholder="nome@exemplo.com"></div>
+    <div class="field"><label>WhatsApp com DDD</label><input id="anTel" placeholder="Ex: 14999999999"></div>
+    <div class="field"><label>Cargo</label><select id="anCargo" onchange="eloOnAdminLideres()">${ROLES.map(r => `<option value="${esc(r)}" ${r === 'Consultor' ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select>
+      <small class="muted" style="display:block;margin-top:4px"><b>Consultor</b> = em prévia: as vendas saem na matrícula de um autorizado acima. <b>Consultor autorizado</b> (ou cargo de liderança) = matrícula própria.</small></div>
+    <div class="field"><label>🏬 Loja</label><select id="anLoja" onchange="eloOnAdminLideres()">${hierOpcoesLoja('')}</select>
+      <small class="muted">Ainda não tem a loja? Feche esta janela e crie em "+ Nova loja", logo acima da lista da equipe.</small></div>
+    <div class="field"><label>👑 Líder direto</label><select id="anLider"></select>
+      <small class="muted">Só aparecem pessoas com cargo acima do escolhido. Outras lojas, cargos e líderes entram depois, em "Editar".</small></div>
+    <div class="field"><label>Nº da matrícula (se já tiver)</label><input id="anMatricula" placeholder="Opcional"></div>
+    <div class="row" style="justify-content:flex-end"><button class="btn primary" onclick="eloOnAdminSalvarPessoa()">Cadastrar</button></div>`);
+  window.eloOnAdminLideres();
+}
+window.eloOnAdminSalvarPessoa = function(){
+  const v = id => (document.getElementById(id)?.value || '').trim();
+  const nome = v('anNome'), email = v('anEmail').toLowerCase(), tel = v('anTel').replace(/\D/g, ''), cargo = v('anCargo'), loja = v('anLoja'), lider = v('anLider');
+  if (!nome) return alert('Informe o nome completo.');
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return alert('Use o e-mail completo da pessoa (nome@exemplo.com). É com ele que ela vai entrar no Elo CRM.');
+  if (tel.length < 10) return alert('Informe o WhatsApp com DDD.');
+  if (usersList.some(u => (u.nome || '').trim().toLowerCase() === nome.toLowerCase())) return alert('Já existe alguém com esse nome. Acrescente um sobrenome.');
+  if (usersList.some(u => (u.email || '').toLowerCase() === email)) return alert('Esse e-mail já está cadastrado.');
+  if (!lider && hierNivel(cargo) > 0 && !confirm(`Cadastrar ${nome} sem líder?\n\nEla fica no topo, sem ninguém acima. Normalmente só o Dono de Loja fica assim.`)) return;
+  const nova = { id: 'u_' + Date.now() + Math.random().toString(36).slice(2, 6), authId: null, nome, email, cargo, superiorId: lider || null, nasc: '', matricula: v('anMatricula'), loja, tel, avatar: '', ativo: true };
+  usersList.push(nova);
+  hierGravarVinculos(nova, [{ loja, liderId: lider || null, cargo }]);
+  save(); closeModal();
+  if (espera) { clearTimeout(espera); espera = null; }
+  sincronizar();                                        // sobe já, para o código de acesso aparecer
+};
+
 // publicação de outra pessoa: só leio
 const abrirPostOriginal = window.abrirPublicacaoInfo;
 window.abrirPublicacaoInfo = function(id){
@@ -19788,7 +19861,7 @@ window.abrirPublicacaoInfo = function(id){
   if (post && post.autor && currentUser && post.autor !== currentUser.id) {
     document.querySelectorAll('#modal button').forEach(b => { if (/Editar|Excluir/.test(b.textContent)) b.style.display = 'none'; });
     const autor = hierUsuario(post.autor); const tit = document.querySelector('#modal h2');
-    if (autor && tit) tit.insertAdjacentHTML('afterend', `<small class="muted" style="display:block">Publicado por ${esc(autor.nome)}</small>`);
+    if (tit) tit.insertAdjacentHTML('afterend', `<small class="muted" style="display:block">${autor ? 'Publicado por ' + esc(autor.nome) : 'Aviso da administração do Elo CRM'}</small>`);
   }
 };
 // backup de outro CRM: os registros do dono daquele CRM passam a ser meus aqui (o nome dele vira o meu)
@@ -19915,6 +19988,7 @@ function partida(){
   try { localStorage.setItem(`crm_login_timestamp_${EQUIPE_ID}`, String(Date.now())); } catch (e) {}
   if (!currentUser) { const p = lerJson(`crm_active_user_${EQUIPE_ID}`, null) || (usersList || []).find(u => u.id === eu().id); if (p) { currentUser = (usersList || []).find(u => u.id === p.id) || p; try { initAuth(); } catch (e) {} } }
   montarAdmin(); ajustarConfiguracoes(); atualizarSelo();
+  if (eloOnSouAdmin()) pedir('/rest/v1/rpc/elo_versao', { metodo: 'GET', espera: 12000 }).then(r => { if (r.ok && r.j && r.j.elo === 'ok' && (r.j.versao || 1) < BANCO_VERSAO) aviso('O banco na Supabase está numa versão antiga. Cole o texto novo de instalação no SQL Editor para atualizar.', 'warn'); });
   if (primeiraCarga) { const f = document.createElement('div'); f.id = 'eloOnCarga'; f.className = 'elo-on-carga'; f.textContent = '⏳ Baixando seus dados da nuvem…'; document.body.appendChild(f); }
   // fecha a janela -> atualiza a tela com o que chegou enquanto ela estava aberta
   const fecharOriginal = window.closeModal;
