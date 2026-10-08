@@ -3937,8 +3937,13 @@ function hierEstaAcima(liderId, userId, loja){
   const lojas = hierAbaixoDe(liderId).get(userId);
   return !!lojas && (!loja || lojas.has(loja) || lojas.has(''));
 }
-// Só quem está no topo (não tem líder nenhum) cria, renomeia e exclui lojas
+// Quem gere as lojas (cria, renomeia e exclui). No CRM de um aparelho só, é quem está no topo; no Elo online, só a administração.
 function hierPodeGerirLojas(){ return !!currentUser && !hierTemLider(currentUser.id); }
+// Renomear uma loja: quem gere as lojas, ou o Dono de Loja daquela loja
+function hierSouDonoDaLoja(id){ return !!currentUser && !!id && hierVinculos(currentUser).some(v => v.loja === id && String(v.cargo || '').trim().toLowerCase() === 'dono de loja'); }
+function hierPodeRenomearLoja(id){ return hierPodeGerirLojas() || hierSouDonoDaLoja(id); }
+// Trocar a própria loja principal: só onde não existe ninguém acima para definir (no Elo online, ninguém troca a própria loja)
+function hierPodeDefinirMinhaLoja(){ return hierPodeGerirLojas(); }
 
 // ---------- o que eu enxergo ----------
 // Quem eu enxergo: eu + todos abaixo de mim (nunca quem está ao lado ou acima)
@@ -4691,7 +4696,7 @@ function hierRenderLojas(){
     const muitasLojas = hierLojas().length > 6;
     const lojasAbertas = !muitasLojas || window.__hierLojasAbertas;
     html += `<div class="hier-lojas"${lojasAbertas ? '' : ' style="margin-bottom:10px;padding:7px 12px"'}>
-      <div class="hier-lojas-titulo"${lojasAbertas ? '' : ' style="margin-bottom:0"'}><b>Lojas (${hierLojas().length})</b> ${muitasLojas ? `<button class="tc-btn" style="margin:0 6px" onclick="window.__hierLojasAbertas = !window.__hierLojasAbertas; hierRenderLojas()">${lojasAbertas ? 'ocultar' : 'mostrar lojas'}</button>` : ''}<span class="tc-sub">Só você, que está no topo, cria e altera as lojas. Cada líder liga os liderados à loja e ao líder certos em "Editar".</span></div>
+      <div class="hier-lojas-titulo"${lojasAbertas ? '' : ' style="margin-bottom:0"'}><b>Lojas (${hierLojas().length})</b> ${muitasLojas ? `<button class="tc-btn" style="margin:0 6px" onclick="window.__hierLojasAbertas = !window.__hierLojasAbertas; hierRenderLojas()">${lojasAbertas ? 'ocultar' : 'mostrar lojas'}</button>` : ''}<span class="tc-sub">${ELO_ONLINE ? 'Só a administração cria e exclui lojas. O Dono de Loja pode mudar o nome da loja dele.' : 'Só você, que está no topo, cria e altera as lojas.'} Cada líder liga os liderados à loja e ao líder certos em "Editar".</span></div>
       <div style="${lojasAbertas ? '' : 'display:none'}">
       <div class="hier-lojas-lista">
         ${hierLojas().slice().sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR')).map(l => `<span class="hier-loja-chip"><b>${esc(l.nome)}</b> <span class="tc-sub">${qtd(l.id)} pessoa(s)</span>
@@ -4699,16 +4704,21 @@ function hierRenderLojas(){
       </div>
       <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
         <button class="tc-btn forte" onclick="hierAbrirLoja()">+ Nova loja</button>
-        <span class="tc-sub" style="margin-left:8px">Minha loja principal:</span>
-        <select style="max-width:220px;padding:4px 8px;font-size:12.5px" onchange="hierDefinirMinhaLoja(this.value)">${hierOpcoesLoja(hierLojaPrincipal(currentUser))}</select>
+        ${hierPodeDefinirMinhaLoja() ? `<span class="tc-sub" style="margin-left:8px">Minha loja principal:</span>
+        <select style="max-width:220px;padding:4px 8px;font-size:12.5px" onchange="hierDefinirMinhaLoja(this.value)">${hierOpcoesLoja(hierLojaPrincipal(currentUser))}</select>` : ''}
       </div>
       </div>
     </div>`;
+  } else {
+    // Dono de Loja: pode renomear a(s) loja(s) dele
+    const minhas = hierLojas().filter(l => hierSouDonoDaLoja(l.id)).sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
+    if (minhas.length) html += `<div class="hier-lojas"><div class="hier-lojas-titulo"><b>${minhas.length > 1 ? 'Suas lojas' : 'Sua loja'}</b></div>
+      <div class="hier-lojas-lista">${minhas.map(l => `<span class="hier-loja-chip"><b>${esc(l.nome)}</b> <a onclick="hierAbrirLoja('${l.id}')">renomear</a></span>`).join('')}</div></div>`;
   }
   el.innerHTML = html;
 }
 function hierAbrirLoja(id){
-  if (!hierPodeGerirLojas()) return;
+  if (id ? !hierPodeRenomearLoja(id) : !hierPodeGerirLojas()) return alert(id ? 'Só a administração ou o Dono de Loja pode mudar o nome desta loja.' : 'Só a administração cria lojas.');
   const l = id ? hierLojas().find(x => x.id === id) : null;
   openModal(`
     <div class="between"><h2 style="margin:0">${l ? 'Renomear loja' : 'Nova loja'}</h2><button class="btn" onclick="closeModal()">✕</button></div>
@@ -4717,7 +4727,7 @@ function hierAbrirLoja(id){
   setTimeout(() => document.getElementById('hierLojaNomeInput')?.focus(), 50);
 }
 function hierSalvarLoja(id){
-  if (!hierPodeGerirLojas()) return;
+  if (id ? !hierPodeRenomearLoja(id) : !hierPodeGerirLojas()) return;
   const nome = (document.getElementById('hierLojaNomeInput')?.value || '').trim();
   if (!nome) return alert('Informe o nome da loja.');
   if (hierLojas().some(x => x.id !== id && (x.nome || '').toLowerCase() === nome.toLowerCase())) return alert('Já existe uma loja com esse nome.');
@@ -4734,7 +4744,7 @@ function hierExcluirLoja(id){
   save(); showToast('Loja excluída.');
 }
 function hierDefinirMinhaLoja(v){
-  if (!hierPodeGerirLojas()) return;
+  if (!hierPodeDefinirMinhaLoja()) return;
   const outras = hierLojasDe(currentUser).filter(l => l !== v);
   hierGravarVinculos(currentUser, (v ? [v] : []).concat(outras).map(l => ({ loja: l, liderId: null, cargo: hierCargoNaLoja(currentUser, l) })));
   save(); showToast('Sua loja principal foi atualizada.');
@@ -19040,7 +19050,7 @@ if (typeof ELO_ONLINE === 'undefined' || !ELO_ONLINE) return;
 const URL_BASE = ELO_ON.url.replace(/\/+$/, '');
 const CHAVE = ELO_ON.chave;
 const K_SESSAO = 'elo_on_sessao', K_CONTA = 'elo_on_conta';
-const BANCO_VERSAO = 4;      // versão do texto de instalação que esta versão do CRM espera encontrar na Supabase
+const BANCO_VERSAO = 5;      // versão do texto de instalação que esta versão do CRM espera encontrar na Supabase
 const K_META = 'crm_on_meta_' + EQUIPE_ID;
 const eu = () => eloOnConta();
 const logado = () => !!(eu() && lerSessao());
@@ -19303,11 +19313,15 @@ function fichaPost(p){ const x = Object.assign({}, p); if (typeof x.fileUrl === 
 function levantarMudancas(){
   const eu_ = currentUser.id; const m = { l: [], p: [], i: [], v: [], po: [], n: [] }; const novas = {};
   const apagar = { i: [], v: [], l: [], po: [] };
-  // lojas (só quem pode gerir lojas manda)
-  if ((eu() && eu().admin) || (typeof hierPodeGerirLojas === 'function' && hierPodeGerirLojas())) {
-    const vistos = new Set();
-    (db.lojas || []).forEach(l => { if (!l || !l.id) return; vistos.add(l.id); const h = marca(l); if (meta.h.l[l.id] !== h) { m.l.push({ id: l.id, x: l }); novas['l:' + l.id] = h; } });
-    Object.keys(meta.h.l).forEach(id => { if (!vistos.has(id)) apagar.l.push(id); });
+  // lojas: a administração cria, renomeia e exclui; o Dono de Loja só renomeia a loja dele
+  {
+    const gere = !!(eu() && eu().admin), vistos = new Set();
+    (db.lojas || []).forEach(l => {
+      if (!l || !l.id) return; vistos.add(l.id);
+      if (!gere && !(meta.h.l[l.id] && typeof hierSouDonoDaLoja === 'function' && hierSouDonoDaLoja(l.id))) return;
+      const h = marca(l); if (meta.h.l[l.id] !== h) { m.l.push({ id: l.id, x: l }); novas['l:' + l.id] = h; }
+    });
+    if (gere) Object.keys(meta.h.l).forEach(id => { if (!vistos.has(id)) apagar.l.push(id); });
   }
   // pessoas: eu e quem está abaixo de mim
   (usersList || []).forEach(u => {
@@ -19551,6 +19565,8 @@ function recusas(lista){
   (lista || []).forEach(r => {
     if (r.t === 'p') {
       const u = (usersList || []).find(q => q.id === r.id); const nome = r.nome || (u && u.nome) || 'a pessoa';
+      // meu próprio cargo/loja/líder não saem daqui: os meus outros dados foram salvos e o cadastro volta como está no banco, sem aviso
+      if (r.proprio) { if (meta.h.p[r.id]) querer.p.push(r.id); return; }
       const motivo = { email_em_uso: 'este e-mail já está em uso no Elo CRM', nome_em_uso: 'já existe alguém com esse nome no Elo CRM (acrescente um sobrenome)', email_invalido: 'o e-mail precisa ser completo (nome@exemplo.com)', sem_permissao: 'você só pode cadastrar ou alterar quem está abaixo de você', lider_de_outra_equipe: 'o líder escolhido não é da sua equipe', lider_em_circulo: 'essa pessoa não pode ficar abaixo de alguém da própria equipe', sem_lider: 'a pessoa precisa de um líder', email_nao_trocou: 'não foi possível trocar o e-mail de quem já entrou; tente de novo mais tarde' }[r.motivo] || r.motivo;
       msgs.push(`Não foi possível salvar o cadastro de ${nome}: ${motivo}.`);
       if (meta.h.p[r.id]) querer.p.push(r.id);                              // já existia: busco de volta como está no banco
@@ -19565,7 +19581,14 @@ function recusas(lista){
       if (r.motivo === 'limite') msgs.push('Você chegou ao limite de registros da sua conta. Fale com o administrador.');
       else if (r.motivo === 'grande_demais') msgs.push('Um registro ficou grande demais para ir para a nuvem (muito texto em um lead só). Ele continua neste aparelho.');
       meta.h.i[k] = (function(){ const col = COLECOES.find(c => c.t === r.tipo); const reg = col && (col.ler() || []).find(q => q && String(q.id) === r.id); return reg ? marca(reg) : 'x'; })();
-    } else if (r.t === 'l') { msgs.push('Só quem está no topo da equipe (ou o administrador) cria e altera lojas.'); }
+    } else if (r.t === 'l') {
+      // a loja volta a ficar como está no banco
+      msgs.push('Só a administração cria e exclui lojas. O nome de uma loja só pode ser mudado pela administração ou pelo Dono de Loja dela.');
+      if (!Array.isArray(db.lojas)) db.lojas = [];
+      const i = db.lojas.findIndex(q => q && q.id === r.id);
+      if (r.x) { if (i >= 0) trocarConteudo(db.lojas[i], r.x); else db.lojas.push(r.x); meta.h.l[r.id] = marca(r.x); }
+      else if (r.novo) { if (i >= 0) db.lojas.splice(i, 1); delete meta.h.l[r.id]; }
+    }
   });
   [...new Set(msgs)].slice(0, 3).forEach(t => aviso(t, 'warn'));
   return querer;
@@ -19625,7 +19648,8 @@ async function sincronizar(op){
       const envio = {}; let cabem = lote, sobrou = false;
       ['l', 'p', 'i', 'v', 'po', 'n'].forEach(t => { if (!m[t].length) return; const parte = m[t].slice(0, Math.max(cabem, 0)); if (parte.length < m[t].length) sobrou = true; if (parte.length) envio[t] = parte; cabem -= parte.length; });
       const enviados = new Set(); Object.keys(envio).forEach(t => envio[t].forEach(it => enviados.add((t === 'i' ? 'i:' + chaveItem(it.t, it.d, it.id) : t + ':' + it.id))));
-      const corpo = Object.assign({ rev: meta.rev, pv: meta.pv }, extra); extra = {};
+      if (!meta.euConferido && meta.rev) { extra.quero = (extra.quero || []).concat([eu().id]); }
+      const corpo = Object.assign({ rev: meta.rev, pv: meta.pv }, extra); const pediuEu = !meta.euConferido; extra = {};
       if (Object.keys(envio).length) corpo.m = envio;
       const r = await rpc('elo_sinc', { p: corpo });
       if (r.sair) { ultimoErro = 'sair'; gravarSessao(null); aviso('Sua sessão terminou neste aparelho. Entre de novo para continuar sincronizando.', 'warn'); setTimeout(() => location.reload(), 2500); break; }
@@ -19676,6 +19700,7 @@ async function sincronizar(op){
         mostrarCodigos(j.codigos);
       }
       if (typeof j.rev === 'number') meta.rev = j.rev;
+      if (pediuEu) meta.euConferido = 1;
       if (querer.p.length) extra.quero = (extra.quero || []).concat(querer.p);
       if (querer.v.length) extra.querov = querer.v;
       meta.quando = Date.now(); gravarMeta();
@@ -19927,6 +19952,10 @@ window.hierSeloMatricula = function(s){
   const antes = typeof seloMatriculaAntes === 'function' ? seloMatriculaAntes(s) : '';
   return antes + (s && s.particular === true ? ' <span class="badge b-blue" style="cursor:pointer" title="Só você vê esta venda. Toque para mudar." onclick="eloOnAbrirParticulares()">🔒 só minha</span>' : '');
 };
+// ================== LOJAS: no Elo online quem cria e exclui é só a administração ==================
+// (o Dono de Loja renomeia a loja dele; ninguém troca a própria loja: quem define é quem está acima, de Gestor para cima, ou a administração)
+window.hierPodeGerirLojas = function(){ return eloOnSouAdmin(); };
+window.hierPodeDefinirMinhaLoja = function(){ return false; };
 window.eloOnAbrirParticulares = function(){
   const todas = minhasVendas().slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))), part = todas.filter(s => s.particular === true).length;
   const dia = s => { const d = String(s.date || '').slice(0, 10); return d ? d.split('-').reverse().join('/') : 'sem data'; };
