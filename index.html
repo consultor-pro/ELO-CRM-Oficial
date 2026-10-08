@@ -20229,8 +20229,8 @@ const ASSIST_BASE = [
   r: '1. No **Dashboard**, toque em **📄 Exportar relatório**.\n2. Escolha **Diário, Semanal, Mensal, Anual ou Personalizado** e a data.\n3. Toque em **Gerar relatório**.\n4. Toque em **🖨️ Imprimir / Salvar PDF**. Para ter o arquivo, escolha "Salvar como PDF" na impressão.\nPara quem lidera, o relatório traz as lojas, o ranking das lojas, o ranking de vendedores e o ranking dos membros de cada loja; para todos, traz o seu Dashboard no período.', aba: 'dashboard' },
 { id: 'semaforo', t: 'Como funciona o Semáforo & Ranking?', k: 'semaforo, ranking, cores, verde amarelo laranja vermelho, podio, desempenho',
   r: 'O **Semáforo** mostra o desempenho de cada pessoa no período, em cores:\n- 🟢 **Verde**: superando a meta.\n- 🟡 **Amarelo**: ritmo saudável.\n- 🟠 **Laranja**: tração baixa, acelerar contatos.\n- 🔴 **Vermelho**: sem fechamentos no período.\nNo alto fica o **pódio**. Escolha o período (dia, semana, mês, ano ou tudo).', aba: 'semaforo' },
-{ id: 'resultado_loja', so: 'lider', t: 'Onde vejo o resultado da loja inteira?', k: 'resultado da loja, numeros da loja, quanto a loja vendeu, dono de loja, socio integral',
-  r: 'O **Dono de Loja** e o **Sócio Integral** veem, no **Semáforo**, o cartão **🏬 Resultado da loja**: quantas vendas e quanto cada pessoa vendeu na loja, inclusive de outras equipes (só números, sem clientes). Os demais líderes veem a produção das lojas no quadro do Dashboard.', aba: 'semaforo' },
+{ id: 'resultado_loja', so: 'lider', t: 'Onde vejo o resultado da loja inteira?', k: 'resultado da loja, numeros da loja, quanto a loja vendeu, dono de loja, socio integral, resultado geral, todas as lojas, geral das lojas',
+  r: 'O **Dono de Loja** e o **Sócio Integral** veem, no **Semáforo**, o cartão **🏬 Resultado da loja**: quantas vendas e quanto cada pessoa vendeu na loja, inclusive de outras equipes (só números, sem clientes). Quem manda em mais de uma loja escolhe **Todas as minhas lojas — geral** para ver o ranking das lojas e de quem vendeu em todas juntas. Os demais líderes veem a produção das lojas no quadro do Dashboard.', aba: 'semaforo' },
 { id: 'mapa_cotas', t: 'O que é o Mapa de Cotas?', k: 'mapa de cotas, cotas vendidas, cores do mapa, ver cota, numero da cota',
   r: 'O **Mapa de Cotas** mostra as cotas de 1 a 10.000 com cor por segmento. **Dourada** = contemplada; **cinza escuro** = cancelada. Toque numa cota para ver o cliente, o vendedor e o crédito, e para marcar contemplada ou cancelada. Filtre por consultor, segmento e faixa.', aba: 'mapaCotas' },
 
@@ -20549,7 +20549,9 @@ const ASSIST_BASE = [
 .elo-on-carga { position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%); z-index: 9000; background: #111827; color: #fff; border-radius: 999px; padding: 9px 16px; font-size: 13px; box-shadow: 0 8px 24px rgba(0,0,0,.25); }
 .elo-on-resumo { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 14px; }
 .elo-on-resumo > div { border: 1px solid var(--line, #e5e7eb); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
-.elo-on-resumo b { font-size: 20px; font-variant-numeric: tabular-nums; }
+.elo-on-resumo b { font-size: 20px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.elo-on-resumo > div { min-width: 0; }
+@media (max-width: 480px) { .elo-on-resumo > div:nth-child(2) { order: -1; grid-column: 1 / -1; } .elo-on-resumo b { font-size: 18px; } }
 .elo-on-resumo span { font-size: 12px; color: #64748b; }
 .elo-on-banco { grid-column: span 2; }
 .elo-on-banco i { display: block; height: 6px; border-radius: 99px; background: #e5e7eb; margin-top: 6px; overflow: hidden; }
@@ -21605,7 +21607,9 @@ function lojaCartao(){
   if (!lojas.length) { if (c) c.style.display = 'none'; return; }
   if (!c) { c = document.createElement('div'); c.id = 'eloOnLojaCard'; c.className = 'card'; c.style.marginBottom = '16px'; pagina.insertAdjacentElement('afterbegin', c); }
   c.style.display = '';
-  if (!lojas.some(l => l.id === lojaSel)) { lojaSel = lojas[0].id; lojaDados = null; }
+  // mais de uma loja: começa no resultado geral (todas as lojas juntas)
+  if (!(lojaSel === '*' && lojas.length > 1) && !lojas.some(l => l.id === lojaSel)) { lojaSel = lojas.length > 1 ? '*' : lojas[0].id; lojaDados = null; }
+  const geral = lojaSel === '*';
   const periodos = [['mes', 'Este mês'], ['mesPassado', 'Mês passado'], ['ano', 'Este ano'], ['tudo', 'Todo o período']];
   let corpo = '<p class="muted" style="margin:10px 0 0">Carregando os números da loja…</p>';
   if (lojaDados && lojaDados.erroTexto) corpo = `<p class="muted" style="margin:10px 0 0">${esc(lojaDados.erroTexto)}</p>`;
@@ -21613,24 +21617,53 @@ function lojaCartao(){
     const minha = new Set([currentUser.id, ...hierAbaixoDe(currentUser.id).keys()]);
     const venderam = lojaDados.pessoas.filter(p => p.n > 0), zerados = lojaDados.pessoas.length - venderam.length;
     corpo = `<div class="elo-on-resumo" style="margin:12px 0 10px">
-        <div><b>${Number(lojaDados.vendas)}</b><span>venda(s) na loja</span></div>
-        <div><b>${esc(hierMoeda(lojaDados.volume))}</b><span>volume da loja</span></div>
+        <div><b>${Number(lojaDados.vendas)}</b><span>venda(s) ${geral ? 'nas lojas' : 'na loja'}</span></div>
+        <div><b>${esc(hierMoeda(lojaDados.volume))}</b><span>volume ${geral ? 'das lojas' : 'da loja'}</span></div>
         <div><b>${Number(lojaDados.venderam)}</b><span>pessoa(s) venderam</span></div>
         <div><b>${zerados}</b><span>sem venda no período</span></div></div>
-      <div style="overflow-x:auto;max-height:420px;overflow-y:auto"><table class="tabela-compacta"><thead><tr><th>Pos.</th><th>Pessoa</th><th style="text-align:right">Vendas</th><th style="text-align:right">Volume (R$)</th><th>Cargo · líder na loja</th><th>Equipe</th></tr></thead><tbody>
-      ${lojaDados.pessoas.map((p, i) => `<tr${p.n ? '' : ' style="opacity:.6"'}><td>${p.n ? (i + 1) + 'º' : '-'}</td><td><b>${esc(p.nome || 'Sem cadastro')}</b></td><td style="text-align:right">${Number(p.n)}</td><td style="text-align:right;font-weight:700">${esc(hierMoeda(p.vol))}</td><td><span class="tc-sub">${esc(p.cargo || '-')}${p.lider ? ' › ' + esc(p.lider) : ''}</span></td><td>${p.id && minha.has(p.id) ? '<span class="tc-tag">sua equipe</span>' : '<span class="tc-sub">outra equipe</span>'}</td></tr>`).join('') || '<tr><td colspan="6" class="tc-sub" style="text-align:center;padding:14px">Ninguém cadastrado nesta loja.</td></tr>'}
+      ${geral && lojaDados.lojas ? `<div style="overflow-x:auto;margin-bottom:12px"><table class="tabela-compacta"><thead><tr><th>Pos.</th><th>Loja</th><th style="text-align:right">Vendas</th><th style="text-align:right">Volume (R$)</th><th style="text-align:right">% do total</th><th style="text-align:right">Pessoas que venderam</th></tr></thead><tbody>
+        ${lojaDados.lojas.map((l, i) => `<tr${l.vendas ? '' : ' style="opacity:.6"'}><td>${l.vendas ? (i + 1) + 'º' : '-'}</td><td><b>${esc(l.nome)}</b></td><td style="text-align:right">${Number(l.vendas)}</td><td style="text-align:right;font-weight:700">${esc(hierMoeda(l.volume))}</td><td style="text-align:right">${lojaDados.volume ? Math.round(l.volume / lojaDados.volume * 100) + '%' : '-'}</td><td style="text-align:right">${Number(l.venderam)}</td></tr>`).join('')}
+      </tbody></table></div>` : ''}
+      <div style="overflow-x:auto;max-height:420px;overflow-y:auto"><table class="tabela-compacta"><thead><tr><th>Pos.</th><th>Pessoa</th><th style="text-align:right">Vendas</th><th style="text-align:right">Volume (R$)</th><th>${geral ? 'Loja · cargo · líder' : 'Cargo · líder na loja'}</th><th>Equipe</th></tr></thead><tbody>
+      ${lojaDados.pessoas.slice(0, HIER_MAX_LINHAS).map((p, i) => `<tr${p.n ? '' : ' style="opacity:.6"'}><td>${p.n ? (i + 1) + 'º' : '-'}</td><td><b>${esc(p.nome || 'Sem cadastro')}</b></td><td style="text-align:right">${Number(p.n)}</td><td style="text-align:right;font-weight:700">${esc(hierMoeda(p.vol))}</td><td><span class="tc-sub">${p.lojasTxt ? esc(p.lojasTxt) + ' · ' : ''}${esc(p.cargo || '-')}${p.lider ? ' › ' + esc(p.lider) : ''}</span></td><td>${p.id && minha.has(p.id) ? '<span class="tc-tag">sua equipe</span>' : '<span class="tc-sub">outra equipe</span>'}</td></tr>`).join('') + hierNotaLimite(lojaDados.pessoas.length, 6, 'Aparecem primeiro as pessoas que mais venderam.') || '<tr><td colspan="6" class="tc-sub" style="text-align:center;padding:14px">Ninguém cadastrado nesta loja.</td></tr>'}
       </tbody></table></div>`;
   }
-  c.innerHTML = `<div class="between" style="gap:10px;flex-wrap:wrap"><div><h2 style="margin:0">🏬 Resultado da loja</h2><small class="muted">Os números da loja inteira, inclusive de quem não é da sua equipe. Só o Dono de Loja e os Sócios Integrais da loja veem este quadro. Clientes, grupos e cotas das outras equipes não aparecem.</small></div>
+  c.innerHTML = `<div class="between" style="gap:10px;flex-wrap:wrap"><div><h2 style="margin:0">🏬 ${geral ? 'Resultado geral das lojas' : 'Resultado da loja'}</h2><small class="muted">${geral ? 'Todas as suas lojas juntas: o ranking das lojas e de quem vendeu, inclusive de quem não é da sua equipe.' : 'Os números da loja inteira, inclusive de quem não é da sua equipe.'} Só o Dono de Loja e os Sócios Integrais da loja veem este quadro. Clientes, grupos e cotas das outras equipes não aparecem.</small></div>
       <div class="row" style="gap:8px;flex-wrap:wrap">
-        <select onchange="eloOnLojaMudar('loja', this.value)" style="max-width:230px;margin:0" ${lojas.length > 1 ? '' : 'disabled'}>${lojas.map(l => `<option value="${esc(l.id)}" ${l.id === lojaSel ? 'selected' : ''}>${esc(l.nome)}</option>`).join('')}</select>
+        <select onchange="eloOnLojaMudar('loja', this.value)" style="max-width:230px;margin:0" ${lojas.length > 1 ? '' : 'disabled'}>${lojas.length > 1 ? `<option value="*" ${geral ? 'selected' : ''}>Todas as minhas lojas (${lojas.length}) — geral</option>` : ''}${lojas.map(l => `<option value="${esc(l.id)}" ${l.id === lojaSel ? 'selected' : ''}>${esc(l.nome)}</option>`).join('')}</select>
         <select onchange="eloOnLojaMudar('periodo', this.value)" style="max-width:170px;margin:0">${periodos.map(o => `<option value="${o[0]}" ${o[0] === lojaPeriodo ? 'selected' : ''}>${o[1]}</option>`).join('')}</select>
         <button class="btn" onclick="eloOnLojaMudar()">Atualizar</button></div></div>${corpo}`;
+}
+function juntarLojas(lojas, res){
+  const pessoas = new Map(), lista = [];
+  res.forEach((j, k) => {
+    const nomeLoja = lojas[k].nome;
+    lista.push({ nome: nomeLoja, vendas: Number(j.vendas) || 0, volume: Number(j.volume) || 0, venderam: Number(j.venderam) || 0 });
+    (j.pessoas || []).forEach(p => {
+      const chave = p.id || ('nome:' + (p.nome || ''));
+      let o = pessoas.get(chave);
+      if (!o) { o = { id: p.id, nome: p.nome, n: 0, vol: 0, cargos: new Set(), lideres: new Set(), lojas: new Set() }; pessoas.set(chave, o); }
+      o.n += Number(p.n) || 0; o.vol += Number(p.vol) || 0;
+      if (p.cargo) o.cargos.add(p.cargo); if (p.lider) o.lideres.add(p.lider);
+      o.lojas.add(nomeLoja);
+    });
+  });
+  const ps = [...pessoas.values()].map(o => ({ id: o.id, nome: o.nome, n: o.n, vol: o.vol, cargo: [...o.cargos].join(' / '), lider: [...o.lideres].join(', '),
+    lojasTxt: o.lojas.size > 1 ? o.lojas.size + ' lojas' : [...o.lojas][0] }))
+    .sort((a, b) => b.vol - a.vol || b.n - a.n || String(a.nome).localeCompare(String(b.nome), 'pt-BR'));
+  lista.sort((a, b) => b.volume - a.volume || b.vendas - a.vendas);
+  return { loja: '*', pessoas: ps, lojas: lista, vendas: lista.reduce((a, l) => a + l.vendas, 0), volume: lista.reduce((a, l) => a + l.volume, 0), venderam: ps.filter(p => p.n > 0).length };
 }
 async function lojaBuscar(){
   if (!lojasQueMando().length) return lojaCartao();
   lojaCartao(); const meu = ++lojaPedido; const [de, ate] = lojaIntervalo();
-  const r = await rpc('elo_loja_resultado', { p_loja: lojaSel, p_de: de, p_ate: ate });
+  let r;
+  if (lojaSel === '*') {
+    // resultado geral: busca loja por loja (as mesmas regras de cada loja) e junta
+    const lojas = lojasQueMando();
+    const rs = await Promise.all(lojas.map(l => rpc('elo_loja_resultado', { p_loja: l.id, p_de: de, p_ate: ate })));
+    r = rs.find(x => x.rede || x.falha || !x.j || x.j.erro) || { j: juntarLojas(lojas, rs.map(x => x.j)) };
+  } else r = await rpc('elo_loja_resultado', { p_loja: lojaSel, p_de: de, p_ate: ate });
   if (meu !== lojaPedido) return;
   if (r.rede) lojaDados = { erroTexto: 'Sem internet agora. Os números da loja aparecem quando você estiver online.' };
   else if (r.falha) lojaDados = { erroTexto: r.status === 404 ? 'O banco na Supabase precisa ser atualizado para mostrar este quadro. Avise o administrador.' : 'Não foi possível buscar os números da loja agora.' };
